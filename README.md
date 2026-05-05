@@ -1,17 +1,16 @@
 # CardForge AI
 
-CardForge AI is a Discord-first AI agent for selling and coordinating custom trading card projects.
-It turns casual customer messages into a structured order flow: collect requirements, generate polished card prompts, present multiple design directions, revise concepts based on feedback, confirm the final design, and create a Shopify checkout link.
-
-This project is built for Discord communities, custom card sellers, and creators who want an AI-assisted workflow for made-to-order card sales.
+CardForge AI is a Discord-first AI agent for custom trading card sales and design coordination.
+It turns customer chat into a structured workflow: collect requirements, generate polished prompts, present multiple design directions, revise concepts from feedback, confirm the final version, and create a Shopify checkout link.
 
 ## Highlights
 
 - Multi-agent workflow for inquiry, prompt generation, style exploration, feedback refinement, and Shopify product creation
-- Discord bot that supports multi-turn customer conversations
+- Discord bot for multi-turn customer conversations
 - A/B/C design option flow with mock image previews
+- Automatic AI provider fallback across multiple configured APIs
 - PostgreSQL + Prisma persistence for user memory, project state, style options, and conversation history
-- Shopify product creation with made-to-order messaging and an estimated 30-day delivery note
+- Shopify product creation with made-to-order messaging and a 30-day delivery note
 - Railway-ready deployment setup
 
 ## Example User Journey
@@ -23,7 +22,7 @@ I want a black and gold dark queen trading card, SSR, physical card, 10 copies.
 ```
 
 2. The bot collects any missing details.
-3. The prompt agent turns the request into a polished image prompt.
+3. The prompt agent converts the request into a polished image prompt.
 4. The style agent generates three design directions:
    - A. Black Gold Luxury Card
    - B. Dark Gothic Queen Card
@@ -42,6 +41,7 @@ I want a black and gold dark queen trading card, SSR, physical card, 10 copies.
 - Prisma
 - PostgreSQL
 - Claude API / Anthropic SDK
+- OpenAI-compatible APIs
 - Shopify Admin API
 - dotenv
 - Railway
@@ -50,42 +50,42 @@ I want a black and gold dark queen trading card, SSR, physical card, 10 copies.
 
 ```text
 cardforge-ai/
-├─ src/
-│  ├─ index.ts
-│  ├─ server.ts
-│  ├─ bot/
-│  │  └─ discord.bot.ts
-│  ├─ agents/
-│  │  ├─ main-agent.ts
-│  │  ├─ prompt-agent.ts
-│  │  ├─ style-agent.ts
-│  │  ├─ feedback-agent.ts
-│  │  └─ shopify-agent.ts
-│  ├─ services/
-│  │  ├─ claude.service.ts
-│  │  ├─ image.service.ts
-│  │  ├─ shopify.service.ts
-│  │  ├─ memory.service.ts
-│  │  └─ order.service.ts
-│  ├─ prompts/
-│  │  ├─ main-agent.prompt.ts
-│  │  ├─ prompt-generator.prompt.ts
-│  │  ├─ feedback-optimizer.prompt.ts
-│  │  └─ product-description.prompt.ts
-│  ├─ routes/
-│  │  └─ health.route.ts
-│  ├─ types/
-│  │  └─ index.ts
-│  └─ utils/
-│     ├─ json-parser.ts
-│     └─ logger.ts
-├─ prisma/
-│  └─ schema.prisma
-├─ .env.example
-├─ package.json
-├─ tsconfig.json
-├─ railway.json
-└─ README.md
+|-- src/
+|   |-- index.ts
+|   |-- server.ts
+|   |-- bot/
+|   |   `-- discord.bot.ts
+|   |-- agents/
+|   |   |-- main-agent.ts
+|   |   |-- prompt-agent.ts
+|   |   |-- style-agent.ts
+|   |   |-- feedback-agent.ts
+|   |   `-- shopify-agent.ts
+|   |-- services/
+|   |   |-- claude.service.ts
+|   |   |-- image.service.ts
+|   |   |-- shopify.service.ts
+|   |   |-- memory.service.ts
+|   |   `-- order.service.ts
+|   |-- prompts/
+|   |   |-- main-agent.prompt.ts
+|   |   |-- prompt-generator.prompt.ts
+|   |   |-- feedback-optimizer.prompt.ts
+|   |   `-- product-description.prompt.ts
+|   |-- routes/
+|   |   `-- health.route.ts
+|   |-- types/
+|   |   `-- index.ts
+|   `-- utils/
+|       |-- json-parser.ts
+|       `-- logger.ts
+|-- prisma/
+|   `-- schema.prisma
+|-- .env.example
+|-- package.json
+|-- tsconfig.json
+|-- railway.json
+`-- README.md
 ```
 
 ## Core Workflow
@@ -99,6 +99,29 @@ cardforge-ai/
 7. `FeedbackAgent` improves the active prompt when the customer asks for changes.
 8. `ShopifyAgent` prepares title, description, SKU, price, and tags.
 9. `ShopifyService` creates the final product and returns the product URL.
+
+## AI Provider Fallback
+
+The app supports automatic fallback across multiple configured text providers.
+If one provider fails because of quota, insufficient balance, rate limiting, temporary outage, or authorization issues, the service will try the next configured provider.
+
+Supported providers:
+
+- Anthropic
+- OpenAI
+- OpenRouter
+- Kimi / Moonshot
+- DeepSeek
+- DashScope / Qwen
+- Zhipu AI
+- Google Gemini
+- xAI
+
+Provider order is controlled by:
+
+```env
+AI_PROVIDER_ORDER=anthropic,openai,openrouter,kimi,deepseek,dashscope,zhipu,google,xai
+```
 
 ## Local Setup
 
@@ -145,11 +168,31 @@ npm run dev
 DISCORD_BOT_TOKEN=
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openai/gpt-4o-mini
+OPENROUTER_SITE_URL=
+OPENROUTER_APP_NAME=CardForge AI
+KIMI_API_KEY=
+KIMI_MODEL=moonshot-v1-8k
+DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-chat
+DASHSCOPE_API_KEY=
+DASHSCOPE_MODEL=qwen-plus
+ZHIPU_API_KEY=
+ZHIPU_MODEL=glm-4-flash
+GOOGLE_API_KEY=
+GOOGLE_MODEL=gemini-1.5-flash
+XAI_API_KEY=
+XAI_MODEL=grok-2-latest
+AI_PROVIDER_ORDER=anthropic,openai,openrouter,kimi,deepseek,dashscope,zhipu,google,xai
 SHOPIFY_STORE_DOMAIN=
 SHOPIFY_ADMIN_ACCESS_TOKEN=
 SHOPIFY_API_VERSION=2025-10
 DATABASE_URL=
 PORT=3000
+ECHO_BOT_MODE=false
 DEFAULT_CARD_PRICE=29.99
 MOCK_IMAGE_MODE=true
 ```
@@ -237,6 +280,8 @@ I want a black and gold dark queen trading card, SSR, physical card, 10 copies.
 
 Then test these flows:
 
+- quick connectivity test with `hello` to get `Hi bro 🔥`
+- optional echo mode by setting `ECHO_BOT_MODE=true`
 - missing detail follow-up questions
 - option selection with `A`, `B`, or `C`
 - revision requests like `Make it darker`
@@ -273,5 +318,5 @@ When `MOCK_IMAGE_MODE=true`, the app uses placeholder preview URLs from `placeho
 
 ## Current Notes
 
-- If `ANTHROPIC_API_KEY` is missing, the project falls back to local prompt logic so the mock flow can still run.
+- If no provider is available, prompt generation falls back to local logic where applicable.
 - Real Shopify product creation still requires valid Shopify credentials.

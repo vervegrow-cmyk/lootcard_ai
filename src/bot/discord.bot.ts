@@ -86,6 +86,15 @@ export class DiscordBot {
         content: inbound.content
       });
 
+      if (inbound.content.toLowerCase() === "hello") {
+        try {
+          await message.reply("Hi bro 🔥");
+        } catch (replyError) {
+          logger.error("Failed to send Discord hello reply", replyError);
+        }
+        return;
+      }
+
       if (isEchoModeEnabled()) {
         try {
           await message.reply(`我收到了：${inbound.content}`);
