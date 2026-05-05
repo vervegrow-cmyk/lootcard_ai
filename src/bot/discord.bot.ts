@@ -36,6 +36,10 @@ function formatOptionsForReply(result: AgentResult): string {
   return result.reply;
 }
 
+function isEchoModeEnabled(): boolean {
+  return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
+}
+
 export class DiscordBot {
   private readonly client: Client;
   private started = false;
@@ -74,6 +78,22 @@ export class DiscordBot {
         channelId: message.channelId,
         content: message.content.trim()
       };
+
+      logger.info("Received Discord message", {
+        userId: inbound.discordUserId,
+        username: inbound.username,
+        channelId: inbound.channelId,
+        content: inbound.content
+      });
+
+      if (isEchoModeEnabled()) {
+        try {
+          await message.reply(`我收到了：${inbound.content}`);
+        } catch (replyError) {
+          logger.error("Failed to send Discord echo reply", replyError);
+        }
+        return;
+      }
 
       try {
         await memoryService.logConversation(inbound.discordUserId, "user", inbound.content);
