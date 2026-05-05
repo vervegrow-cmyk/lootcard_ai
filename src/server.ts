@@ -14,5 +14,12 @@ export async function startServer(): Promise<void> {
     logger.info(`HTTP server listening on port ${port}`);
   });
 
-  await discordBot.start();
+  try {
+    await discordBot.start();
+  } catch (error) {
+    logger.warn(
+      "HTTP server is running, but Discord bot is offline. Check the token in .env and verify it is the Bot Token from Discord Developer Portal.",
+      error
+    );
+  }
 }

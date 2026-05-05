@@ -150,10 +150,16 @@ cp .env.example .env
 npm run prisma:generate
 ```
 
-6. Run migrations:
+6. Sync or migrate the database:
 
 ```bash
 npm run prisma:migrate
+```
+
+If `prisma migrate dev` is not suitable in your environment, you can use:
+
+```bash
+node .\node_modules\prisma\build\index.js db push
 ```
 
 7. Start development mode:
@@ -165,14 +171,23 @@ npm run dev
 ## Environment Variables
 
 ```env
+PORT=3000
+ECHO_BOT_MODE=false
+MOCK_IMAGE_MODE=true
 DISCORD_BOT_TOKEN=
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/cardforge_ai?schema=public
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+SHOPIFY_ADMIN_ACCESS_TOKEN=
+SHOPIFY_API_VERSION=2025-10
+DEFAULT_CARD_PRICE=29.99
+AI_PROVIDER_ORDER=anthropic,openai,openrouter,kimi,deepseek,dashscope,zhipu,google,xai
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4o-mini
-OPENROUTER_SITE_URL=
+OPENROUTER_SITE_URL=https://github.com/vervegrow-cmyk/lootcard_ai
 OPENROUTER_APP_NAME=CardForge AI
 KIMI_API_KEY=
 KIMI_MODEL=moonshot-v1-8k
@@ -186,15 +201,6 @@ GOOGLE_API_KEY=
 GOOGLE_MODEL=gemini-1.5-flash
 XAI_API_KEY=
 XAI_MODEL=grok-2-latest
-AI_PROVIDER_ORDER=anthropic,openai,openrouter,kimi,deepseek,dashscope,zhipu,google,xai
-SHOPIFY_STORE_DOMAIN=
-SHOPIFY_ADMIN_ACCESS_TOKEN=
-SHOPIFY_API_VERSION=2025-10
-DATABASE_URL=
-PORT=3000
-ECHO_BOT_MODE=false
-DEFAULT_CARD_PRICE=29.99
-MOCK_IMAGE_MODE=true
 ```
 
 ## PostgreSQL
@@ -202,10 +208,37 @@ MOCK_IMAGE_MODE=true
 Example local connection string:
 
 ```env
-DATABASE_URL=postgresql://username:password@localhost:5432/cardforge_ai?schema=public
+DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/cardforge_ai?schema=public
 ```
 
 Railway PostgreSQL can also provide the `DATABASE_URL` directly.
+
+For local Windows development, the typical setup is:
+
+1. Install PostgreSQL
+2. Create the `cardforge_ai` database
+3. Set `DATABASE_URL`
+4. Run Prisma schema sync
+
+Example commands:
+
+```bash
+npm run prisma:generate
+node .\node_modules\prisma\build\index.js db push
+```
+
+### Prisma Client File Lock on Windows
+
+If Prisma Client generation fails with an `EPERM` rename error inside `node_modules\.prisma`, an older Node process is usually still holding the Prisma engine file open.
+
+Fix:
+
+1. Stop the currently running Node process for this project
+2. Rerun:
+
+```bash
+npm run prisma:generate
+```
 
 ## Discord Bot Setup
 
@@ -280,7 +313,7 @@ I want a black and gold dark queen trading card, SSR, physical card, 10 copies.
 
 Then test these flows:
 
-- quick connectivity test with `hello` to get `Hi bro 🔥`
+- quick connectivity test with `hello` to get `Hi bro!`
 - optional echo mode by setting `ECHO_BOT_MODE=true`
 - missing detail follow-up questions
 - option selection with `A`, `B`, or `C`

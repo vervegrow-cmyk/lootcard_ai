@@ -6,11 +6,38 @@ import { AgentResult, DiscordInboundMessage } from "../types";
 import { logger } from "../utils/logger";
 
 function requireEnv(name: string): string {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function maskToken(token: string): string {
+  if (token.length <= 10) {
+    return "***";
+  }
+
+  return `${token.slice(0, 6)}...${token.slice(-6)}`;
+}
+
+function validateDiscordTokenShape(token: string): { valid: boolean; reason?: string } {
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    return {
+      valid: false,
+      reason: `Expected 3 dot-separated parts but got ${parts.length}.`
+    };
+  }
+
+  if (parts.some((part) => part.length === 0)) {
+    return {
+      valid: false,
+      reason: "One or more token segments are empty."
+    };
+  }
+
+  return { valid: true };
 }
 
 function formatOptionsForReply(result: AgentResult): string {
@@ -88,7 +115,7 @@ export class DiscordBot {
 
       if (inbound.content.toLowerCase() === "hello") {
         try {
-          await message.reply("Hi bro 🔥");
+          await message.reply("Hi bro!");
         } catch (replyError) {
           logger.error("Failed to send Discord hello reply", replyError);
         }
@@ -97,7 +124,7 @@ export class DiscordBot {
 
       if (isEchoModeEnabled()) {
         try {
-          await message.reply(`我收到了：${inbound.content}`);
+          await message.reply(`Echo: ${inbound.content}`);
         } catch (replyError) {
           logger.error("Failed to send Discord echo reply", replyError);
         }
@@ -170,8 +197,28 @@ export class DiscordBot {
       return;
     }
 
-    await this.client.login(requireEnv("DISCORD_BOT_TOKEN"));
-    this.started = true;
+    const token = requireEnv("DISCORD_BOT_TOKEN");
+    const shape = validateDiscordTokenShape(token);
+
+    logger.info("Discord token diagnostics", {
+      tokenMask: maskToken(token),
+      tokenLength: token.length,
+      segmentCount: token.split(".").length,
+      shapeValid: shape.valid,
+      shapeReason: shape.reason || "ok"
+    });
+
+    if (!shape.valid) {
+      throw new Error(`DISCORD_BOT_TOKEN format looks invalid. ${shape.reason}`);
+    }
+
+    try {
+      await this.client.login(token);
+      this.started = true;
+    } catch (error) {
+      logger.error("Discord bot failed to start", error);
+      throw error;
+    }
   }
 }
 
