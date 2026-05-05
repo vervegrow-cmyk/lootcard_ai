@@ -1,0 +1,32 @@
+{
+  "name": "cardforge-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CardForge AI Discord custom trading card agent with Claude, Shopify, Prisma, and Railway deployment support.",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "node ./node_modules/tsx/dist/cli.mjs watch src/index.ts",
+    "build": "node ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
+    "start": "node dist/index.js",
+    "prisma:generate": "node ./node_modules/prisma/build/index.js generate",
+    "prisma:migrate": "node ./node_modules/prisma/build/index.js migrate dev",
+    "prisma:studio": "node ./node_modules/prisma/build/index.js studio"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@prisma/client": "^6.19.3",
+    "discord.js": "^14.19.3",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.3",
+    "prisma": "^6.19.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

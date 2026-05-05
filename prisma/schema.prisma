@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserMemory {
+  id            String   @id @default(cuid())
+  discordUserId String   @unique
+  username      String
+  profile       String   @default("")
+  stage         String   @default("inquiry")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CardProject {
+  id                 String   @id @default(cuid())
+  discordUserId      String
+  status             String   @default("inquiry")
+  originalPrompt     String
+  currentPrompt      String   @default("")
+  selectedStyleId    String?
+  finalDesignSummary String?
+  shopifyProductId   String?
+  shopifyProductUrl  String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  styleOptions       CardStyleOption[]
+  feedbackLogs       FeedbackLog[]
+  shopifyLogs        ShopifyProductLog[]
+
+  @@index([discordUserId, createdAt])
+}
+
+model CardStyleOption {
+  id            String   @id @default(cuid())
+  cardProjectId String
+  styleId       String
+  styleName     String
+  designSummary String
+  imagePrompt   String
+  imageUrl      String?
+  selected      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  cardProject   CardProject @relation(fields: [cardProjectId], references: [id], onDelete: Cascade)
+
+  @@index([cardProjectId, createdAt])
+}
+
+model FeedbackLog {
+  id            String   @id @default(cuid())
+  cardProjectId String
+  discordUserId String
+  feedbackText  String
+  oldPrompt     String
+  newPrompt     String
+  createdAt     DateTime @default(now())
+
+  cardProject   CardProject @relation(fields: [cardProjectId], references: [id], onDelete: Cascade)
+
+  @@index([cardProjectId, createdAt])
+}
+
+model ShopifyProductLog {
+  id                String   @id @default(cuid())
+  cardProjectId     String
+  discordUserId     String
+  shopifyProductId  String
+  shopifyProductUrl String
+  title             String
+  price             String
+  sku               String
+  createdAt         DateTime @default(now())
+
+  cardProject       CardProject @relation(fields: [cardProjectId], references: [id], onDelete: Cascade)
+
+  @@index([cardProjectId, createdAt])
+}
+
+model ConversationLog {
+  id            String   @id @default(cuid())
+  discordUserId String
+  role          String
+  content       String
+  createdAt     DateTime @default(now())
+
+  @@index([discordUserId, createdAt])
+}
