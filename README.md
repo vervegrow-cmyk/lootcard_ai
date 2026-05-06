@@ -452,6 +452,9 @@ Start command:
 npm run start
 ```
 
+中文：当前推荐把 `prisma db push` 放在启动阶段，通过 `prestart` 执行，这样 Railway 在应用真正连上 PostgreSQL 后会先同步表结构，再启动 Bot。  
+English: The recommended setup is to run `prisma db push` in the startup phase through `prestart`, so Railway syncs the schema after the app can actually reach PostgreSQL, and only then starts the bot.
+
 ## 当前沙箱限制 | Known Limitation in This Sandbox
 
 中文：在当前 Codex 沙箱环境里，外网 HTTPS 出站被环境规则拦截，所以 provider health check 可能报：

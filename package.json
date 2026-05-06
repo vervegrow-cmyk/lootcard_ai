@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "node ./node_modules/tsx/dist/cli.mjs watch src/index.ts",
-    "build": "prisma generate && prisma db push && tsc",
+    "build": "prisma generate && tsc",
+    "prestart": "prisma db push",
     "start": "node dist/index.js",
     "provider:health-check": "node ./scripts/provider-health-check.js",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate",
