@@ -7,6 +7,7 @@ import { promptWorkflowAgent } from "../agents/prompt.agent";
 import { replyAgent } from "../agents/reply.agent";
 import { shopifyWorkflowAgent } from "../agents/shopify.agent";
 import { memoryService } from "../services/memory.service";
+import { isShopifyConfigured } from "../services/shopify.service";
 import { OrchestratorPlan, TargetAgent } from "../types/agent.types";
 import { ProjectMemory, SkillExecutionContext, SkillExecutionResult } from "../types/skill.types";
 import { logger } from "../utils/logger";
@@ -201,6 +202,7 @@ export class DiscordBot {
         console.log("[Hermes Intent]", plan.intent);
         console.log("[Target Agent]", plan.targetAgent);
         console.log("[Target Skill]", plan.targetSkill);
+        console.log("[Shopify Configured]", isShopifyConfigured());
         console.log("[Route Reason]", String(plan.data?.reason || ""));
         console.log("[Stage]", plan.stage);
 

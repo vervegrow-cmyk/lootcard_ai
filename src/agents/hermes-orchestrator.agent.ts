@@ -43,6 +43,7 @@ function detectShopifyLinkRequest(message: string): boolean {
     /checkout\s*link/.test(lower) ||
     /payment\s*link/.test(lower) ||
     /product\s*link/.test(lower) ||
+    /\u6211\u8981\u4e0b\u5355/.test(message) ||
     /shopify[\s-]*\u94fe\u63a5/.test(lower) ||
     /\u4e0b\u5355\u94fe\u63a5/.test(message) ||
     /\u4ed8\u6b3e\u94fe\u63a5/.test(message) ||
@@ -180,7 +181,7 @@ export class HermesOrchestratorAgent {
       return basePlan({
         intent: "create_shopify_link",
         targetAgent: "shopify",
-        targetSkill: "create-checkout-link",
+        targetSkill: "create-product",
         action: "create_shopify_product",
         language,
         stage: "payment",
