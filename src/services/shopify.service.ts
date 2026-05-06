@@ -1,11 +1,7 @@
 import { ShopifyProductDraft, ShopifyProductResult } from "../types";
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
+function getEnv(name: string): string {
+  return process.env[name]?.trim() || "";
 }
 
 function slugify(value: string): string {
@@ -19,8 +15,13 @@ function slugify(value: string): string {
 
 export class ShopifyService {
   async createProduct(product: ShopifyProductDraft): Promise<ShopifyProductResult> {
-    const storeDomain = requireEnv("SHOPIFY_STORE_DOMAIN");
-    const accessToken = requireEnv("SHOPIFY_ADMIN_ACCESS_TOKEN");
+    const storeDomain = getEnv("SHOPIFY_STORE_DOMAIN");
+    const accessToken = getEnv("SHOPIFY_ADMIN_ACCESS_TOKEN");
+
+    if (!storeDomain || !accessToken) {
+      throw new Error("SHOPIFY_NOT_CONFIGURED");
+    }
+
     const apiVersion = process.env.SHOPIFY_API_VERSION || "2025-10";
     const endpoint = `https://${storeDomain}/admin/api/${apiVersion}/products.json`;
 
@@ -51,7 +52,7 @@ export class ShopifyService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Shopify product creation failed: ${response.status} ${errorText}`);
+      throw new Error(`SHOPIFY_CREATE_FAILED: ${response.status} ${errorText}`);
     }
 
     const data = (await response.json()) as {
