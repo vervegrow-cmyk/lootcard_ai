@@ -44,10 +44,10 @@ function env(name: string): string {
 
 function defaultProviderOrder(): ProviderName[] {
   return [
+    "kimi",
     "anthropic",
     "openai",
     "openrouter",
-    "kimi",
     "deepseek",
     "dashscope",
     "zhipu",
