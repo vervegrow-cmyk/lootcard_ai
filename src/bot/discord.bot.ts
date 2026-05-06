@@ -4,11 +4,12 @@ import { designAgent } from "../agents/design.agent";
 import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
 import { memoryWorkflowAgent } from "../agents/memory.agent";
 import { promptWorkflowAgent } from "../agents/prompt.agent";
+import { replyAgent } from "../agents/reply.agent";
 import { shopifyWorkflowAgent } from "../agents/shopify.agent";
 import { memoryService } from "../services/memory.service";
+import { OrchestratorPlan, TargetAgent } from "../types/agent.types";
+import { ProjectMemory, SkillExecutionContext, SkillExecutionResult } from "../types/skill.types";
 import { logger } from "../utils/logger";
-import { OrchestratorPlan, OrchestratorResult, TargetAgent } from "../types/agent.types";
-import { ImageOption, ProjectMemory, SkillExecutionContext, SkillExecutionResult } from "../types/skill.types";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -22,7 +23,6 @@ function maskToken(token: string): string {
   if (token.length <= 10) {
     return "***";
   }
-
   return `${token.slice(0, 6)}...${token.slice(-6)}`;
 }
 
@@ -34,14 +34,12 @@ function validateDiscordTokenShape(token: string): { valid: boolean; reason?: st
       reason: `Expected 3 dot-separated parts but got ${parts.length}.`
     };
   }
-
   if (parts.some((part) => part.length === 0)) {
     return {
       valid: false,
       reason: "One or more token segments are empty."
     };
   }
-
   return { valid: true };
 }
 
@@ -49,44 +47,9 @@ function isEchoModeEnabled(): boolean {
   return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
 }
 
-function classifyErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("SHOPIFY_NOT_CONFIGURED")) {
-    return "Shopify 还没有配置完成，我已经记录最终设计，配置完成后可以生成下单链接。";
-  }
-  if (message.includes("SHOPIFY_CREATE_FAILED")) {
-    return "Shopify 商品创建失败，我已经保留当前设计方案，请稍后重试。";
-  }
-  if (message.toLowerCase().includes("prisma") || message.toLowerCase().includes("database")) {
-    return "数据库记录时出现问题，但我会尽量继续回复你。你可以继续发送需求。";
-  }
-  if (message.toLowerCase().includes("openai") || message.toLowerCase().includes("anthropic") || message.toLowerCase().includes("provider")) {
-    return "AI 处理时出现问题，不过我会优先用本地兜底逻辑继续帮你。你可以再发一次需求。";
-  }
-  if (message.toLowerCase().includes("image")) {
-    return "图片生成流程出了点问题。我可以先继续给你文字方案，或者你再试一次出图指令。";
-  }
-  return "处理这条消息时出现了异常，但服务还在运行。你可以继续发需求，我会尽量从当前上下文接着处理。";
-}
-
-function formatImageOption(option: ImageOption): string {
-  return `【${option.id}】${option.title}\n图片：${option.imageUrl}\n提示词：${option.prompt}`;
-}
-
-function formatReply(result: OrchestratorResult): string {
-  if (result.imageOptions.length > 0) {
-    return [
-      result.reply,
-      "",
-      ...result.imageOptions.map((option) => formatImageOption(option)),
-      "",
-      result.language === "zh"
-        ? "请回复 A/B/C 选择，或直接说修改意见。"
-        : "Reply with A/B/C to choose, or tell me what to revise."
-    ].join("\n\n");
-  }
-
-  return result.reply;
+function classifyProcessingError(error: unknown): string {
+  logger.error("Failed to process Discord message", error);
+  return "Kimi AI 当前回复失败，请查看 Railway 日志。";
 }
 
 function toProjectMemory(memory: {
@@ -105,6 +68,7 @@ function toProjectMemory(memory: {
   selectedImageUrl: string;
   selectedDesignSummary: string;
   revisionHistory: string[];
+  shopifyProductUrl?: string;
 }): ProjectMemory {
   return {
     language: memory.language,
@@ -124,7 +88,7 @@ function toProjectMemory(memory: {
     selectedImageUrl: memory.selectedImageUrl,
     selectedDesignSummary: memory.selectedDesignSummary,
     revisionHistory: memory.revisionHistory,
-    shopifyProductUrl: ""
+    shopifyProductUrl: memory.shopifyProductUrl || ""
   };
 }
 
@@ -209,15 +173,6 @@ export class DiscordBot {
         content: inbound.content
       });
 
-      if (inbound.content.toLowerCase() === "hello") {
-        try {
-          await message.reply("Hi bro!");
-        } catch (replyError) {
-          logger.error("Failed to send Discord hello reply", replyError);
-        }
-        return;
-      }
-
       if (isEchoModeEnabled()) {
         try {
           await message.reply(`Echo: ${inbound.content}`);
@@ -230,10 +185,7 @@ export class DiscordBot {
       try {
         await memoryService.logConversation(inbound.discordUserId, "user", inbound.content);
 
-        const userMemory = await memoryService.getOrCreateUserMemory(
-          inbound.discordUserId,
-          inbound.username
-        );
+        const userMemory = await memoryService.getOrCreateUserMemory(inbound.discordUserId, inbound.username);
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
         const project = toSkillProjectContext(await memoryService.getLatestProject(inbound.discordUserId));
         const projectMemory = toProjectMemory(userMemory.memory);
@@ -249,6 +201,7 @@ export class DiscordBot {
         console.log("[Hermes Intent]", plan.intent);
         console.log("[Target Agent]", plan.targetAgent);
         console.log("[Target Skill]", plan.targetSkill);
+        console.log("[Route Reason]", String(plan.data?.reason || ""));
         console.log("[Stage]", plan.stage);
 
         const skillContext: SkillExecutionContext = {
@@ -266,17 +219,51 @@ export class DiscordBot {
           data: plan.data
         };
 
-        const skillResult = await this.executeAgent(plan.targetAgent, plan, skillContext);
-        console.log("[Skill Result]", {
-          stage: skillResult.stage,
-          actions: skillResult.actions,
-          hasPrompt: Boolean(skillResult.prompt),
-          imageCount: skillResult.imageOptions?.length || 0,
-          hasProduct: Boolean(skillResult.product)
-        });
+        let skillResult: SkillExecutionResult;
+        try {
+          skillResult = await this.executeAgent(plan.targetAgent, plan, skillContext);
+        } catch (toolError) {
+          logger.error("Agent or skill execution failed", toolError);
+          skillResult = {
+            reply: "",
+            stage: plan.stage,
+            actions: ["tool-error"],
+            data: {
+              toolError:
+                toolError instanceof Error ? toolError.message : String(toolError)
+            },
+            replyData: {
+              errorType: "tool_error"
+            }
+          };
+        }
+        console.log("[Skill Result]", skillResult);
 
         const merged = hermesOrchestratorAgent.mergeResult(plan, skillResult);
-        const replyText = formatReply(merged);
+        if (skillResult.actions?.includes("tool-error")) {
+          merged.replyInstruction =
+            plan.language === "zh"
+              ? "工具执行失败了。请根据工具报错内容，用自然、简短、准确的中文说明具体原因，并告诉用户稍后再试或换一种操作。"
+              : "A tool execution failed. Use the tool error details to explain the specific problem naturally and briefly in English, and tell the user they can try again later or take a different step.";
+        }
+
+        let finalReply = "";
+        try {
+          console.log("[Calling Kimi Final Reply]", true);
+          finalReply = await replyAgent.generateReply({
+            userMessage: inbound.content,
+            memory: {
+              ...skillContext.memory,
+              ...(merged.memoryUpdate || {})
+            },
+            history: recentConversation,
+            result: merged
+          });
+          console.log("[Kimi Final Reply]", finalReply);
+        } catch (error) {
+          console.error("[Kimi Reply Error]", error);
+          finalReply = "Kimi AI 当前回复失败，请查看 Railway 日志。";
+        }
 
         await memoryWorkflowAgent.persist({
           discordUserId: inbound.discordUserId,
@@ -290,21 +277,20 @@ export class DiscordBot {
         });
 
         try {
-          await memoryService.logConversation(inbound.discordUserId, "assistant", replyText);
+          await memoryService.logConversation(inbound.discordUserId, "assistant", finalReply);
         } catch (dbError) {
           logger.error("Failed to log assistant reply", dbError);
         }
 
         try {
-          await message.reply(replyText);
+          await message.reply(finalReply);
         } catch (replyError) {
           logger.error("Failed to send Discord reply", replyError);
         }
       } catch (error) {
-        logger.error("Failed to process Discord message", error);
-
+        const fallbackMessage = classifyProcessingError(error);
         try {
-          await message.reply(classifyErrorMessage(error));
+          await message.reply(fallbackMessage);
         } catch (replyError) {
           logger.error("Failed to send Discord error reply", replyError);
         }

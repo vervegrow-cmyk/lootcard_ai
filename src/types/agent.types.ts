@@ -4,7 +4,8 @@ import {
   LanguagePreference,
   ProductDraft,
   ProjectMemory,
-  ProjectStage
+  ProjectStage,
+  SkillExecutionResult
 } from "./skill.types";
 
 export type OrchestratorIntent =
@@ -63,15 +64,17 @@ export interface OrchestratorPlan {
   intent: OrchestratorIntent;
   targetAgent: TargetAgent;
   targetSkill: TargetSkill;
+  action: string;
   language: LanguagePreference;
   stage: ProjectStage;
-  reply: string;
   actions: string[];
   memoryUpdate: Partial<ProjectMemory>;
+  replyInstruction: string;
   data: Record<string, unknown>;
 }
 
 export interface OrchestratorResult extends OrchestratorPlan {
+  skillResult?: SkillExecutionResult;
   prompt?: string;
   imageOptions: ImageOption[];
   selectedOption: ImageOption | null;

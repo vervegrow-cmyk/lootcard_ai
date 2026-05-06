@@ -4,8 +4,36 @@ import { createCheckoutLinkSkill } from "../skills/shopify/create-checkout-link.
 import { createProductSkill } from "../skills/shopify/create-product.skill";
 import { sendPaymentLinkSkill } from "../skills/shopify/send-payment-link.skill";
 
+function hasConfirmedDesign(context: SkillExecutionContext): boolean {
+  const hasPrompt = Boolean(context.memory.currentPrompt?.trim() || context.project?.currentPrompt?.trim());
+  const hasSelectedImage = Boolean(
+    context.memory.selectedOption?.trim() ||
+      context.memory.selectedImageUrl?.trim() ||
+      context.memory.selectedOptionTitle?.trim() ||
+      context.memory.selectedDesignSummary?.trim() ||
+      context.project?.selectedOptionId?.trim() ||
+      context.project?.finalDesignSummary?.trim()
+  );
+
+  return hasPrompt && hasSelectedImage;
+}
+
 export class ShopifyWorkflowAgent {
   async execute(plan: OrchestratorPlan, context: SkillExecutionContext): Promise<SkillExecutionResult> {
+    if (!hasConfirmedDesign(context)) {
+      return {
+        reply:
+          context.language === "zh"
+            ? "我还没有你的最终确认设计，暂时不能生成 Shopify 下单链接。请先生成/确认一张卡牌方案。"
+            : "I do not have your final confirmed design yet, so I cannot create a Shopify checkout link right now. Please generate or confirm a card design first.",
+        stage: "confirmed",
+        actions: ["create_shopify_product", "missing-final-design"],
+        memoryUpdate: {
+          stage: "confirmed"
+        }
+      };
+    }
+
     if (plan.targetSkill !== "create-checkout-link") {
       return createProductSkill.execute(context);
     }
@@ -20,6 +48,10 @@ export class ShopifyWorkflowAgent {
       }
     });
 
+    if (checkoutResult.reply) {
+      return checkoutResult;
+    }
+
     const messageResult = sendPaymentLinkSkill.execute({
       ...context,
       data: {
@@ -31,7 +63,7 @@ export class ShopifyWorkflowAgent {
     return {
       reply: messageResult.reply,
       stage: "payment",
-      actions: ["create-product", "create-checkout-link", "send-payment-link"],
+      actions: ["create_shopify_product", "create-product", "create-checkout-link", "send-payment-link"],
       memoryUpdate: {
         stage: "payment"
       },

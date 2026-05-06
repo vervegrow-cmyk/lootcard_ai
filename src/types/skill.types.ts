@@ -94,6 +94,7 @@ export interface SkillExecutionResult {
   actions?: string[];
   memoryUpdate?: Partial<ProjectMemory>;
   data?: Record<string, unknown>;
+  replyData?: Record<string, unknown>;
   prompt?: string;
   imageOptions?: ImageOption[];
   selectedOption?: ImageOption | null;
