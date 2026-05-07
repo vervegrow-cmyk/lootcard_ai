@@ -2,13 +2,19 @@ import { SkillExecutionContext, SkillExecutionResult } from "../../types/skill.t
 
 export class ExplainPricingSkill {
   execute(context: SkillExecutionContext): SkillExecutionResult {
+    const parsed = Number(process.env.DEFAULT_CARD_PRICE || "29.99");
+    const defaultPrice = Number.isFinite(parsed) ? parsed.toFixed(2) : "29.99";
+
     return {
-      reply:
-        context.language === "zh"
-          ? "价格会根据数量、复杂度、是否做实体卡来判断。你先把想要的图像方向确认下来，我再带你进入下单。"
-          : "Pricing depends on quantity, complexity, and whether you want a physical card. Once the image direction is confirmed, I can guide you to checkout.",
+      reply: "",
       stage: "customer_service",
       actions: ["explain-pricing"],
+      replyData: {
+        type: "pricing_info",
+        defaultPrice,
+        currency: "USD",
+        note: "Custom trading card pricing can vary by quantity, complexity, and whether a physical card is required."
+      },
       memoryUpdate: {
         language: context.language,
         stage: "customer_service"

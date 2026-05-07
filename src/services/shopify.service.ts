@@ -1,25 +1,35 @@
 import { ShopifyProductDraft, ShopifyProductResult } from "../types";
+import { shopifyAuthService } from "./shopify-auth.service";
 
 export interface CreateShopifyProductInput {
   title?: string;
   description?: string;
   price?: number;
   tags?: string[];
+  shop?: string;
 }
 
 export interface CreateShopifyProductOutput {
   ok: boolean;
   productId?: string;
+  variantId?: string;
   handle?: string;
   productUrl?: string;
   adminUrl?: string;
   price?: number;
   title?: string;
+  shop?: string;
+  reauthorizeUrl?: string;
+  missing?: string[];
   error?: string;
 }
 
 function env(name: string): string {
   return process.env[name]?.trim() || "";
+}
+
+function shopifyApiVersion(): string {
+  return env("SHOPIFY_API_VERSION") || "2026-04";
 }
 
 function defaultPrice(): number {
@@ -31,7 +41,18 @@ function defaultTags(): string[] {
   return ["custom-card", "ai-card", "discord-order", "lootcard"];
 }
 
-function slugify(value: string): string {
+function htmlDescription(input?: string): string {
+  return (
+    input?.trim() ||
+    [
+      "Custom-made AI trading card by LootCard AI.",
+      "Production and delivery usually takes about 30 days.",
+      "Final design will follow the confirmed Discord conversation."
+    ].join("<br><br>")
+  );
+}
+
+function titleHandle(value: string): string {
   return value
     .toLowerCase()
     .trim()
@@ -41,7 +62,7 @@ function slugify(value: string): string {
 }
 
 export function isShopifyConfigured(): boolean {
-  return Boolean(env("SHOPIFY_STORE_DOMAIN") && env("SHOPIFY_ADMIN_ACCESS_TOKEN"));
+  return shopifyAuthService.isOAuthConfigured();
 }
 
 export class ShopifyService {
@@ -49,94 +70,343 @@ export class ShopifyService {
     return isShopifyConfigured();
   }
 
+  async getShopifyToken(shop?: string): Promise<{ shop: string; accessToken: string } | null> {
+    const shopRecord =
+      (shop ? await shopifyAuthService.getShopByDomain(shop) : null) ||
+      (await shopifyAuthService.getPrimaryShop());
+
+    if (!shopRecord || shopRecord.reauthorizeRequired) {
+      return null;
+    }
+
+    console.log("[Shopify OAuth Token Loaded]", shopRecord.shop);
+    return {
+      shop: shopRecord.shop,
+      accessToken: shopRecord.accessToken
+    };
+  }
+
   async createShopifyProduct(input: CreateShopifyProductInput): Promise<CreateShopifyProductOutput> {
-    const storeDomain = env("SHOPIFY_STORE_DOMAIN");
-    const accessToken = env("SHOPIFY_ADMIN_ACCESS_TOKEN");
-    const apiVersion = env("SHOPIFY_API_VERSION") || "2026-04";
-
-    if (!storeDomain || !accessToken) {
-      const missing = [
-        !storeDomain ? "SHOPIFY_STORE_DOMAIN" : "",
-        !accessToken ? "SHOPIFY_ADMIN_ACCESS_TOKEN" : ""
-      ].filter(Boolean);
-
+    if (!shopifyAuthService.isOAuthConfigured()) {
       return {
         ok: false,
-        error: `Shopify is not configured. Missing: ${missing.join(", ")}`
+        missing: shopifyAuthService.getMissingOAuthEnv(),
+        error: `Shopify OAuth is not configured. Missing: ${shopifyAuthService.getMissingOAuthEnv().join(", ")}`
+      };
+    }
+
+    const tokenContext = await this.getShopifyToken(input.shop);
+    const shopRecord =
+      (input.shop ? await shopifyAuthService.getShopByDomain(input.shop) : null) ||
+      (await shopifyAuthService.getPrimaryShop());
+
+    if (!shopRecord || !tokenContext) {
+      return {
+        ok: false,
+        missing: ["installed_shop"],
+        error: "No installed Shopify shop was found. Open the embedded app in Shopify Admin to complete OAuth installation first."
+      };
+    }
+
+    if (shopRecord.reauthorizeRequired) {
+      const reauthorizeUrl = await shopifyAuthService.markShopForReauthorization(shopRecord.shop);
+      return {
+        ok: false,
+        shop: shopRecord.shop,
+        reauthorizeUrl,
+        error: "The connected Shopify shop requires reauthorization."
       };
     }
 
     const title = input.title?.trim() || "Custom AI Trading Card";
-    const description =
-      input.description?.trim() ||
-      "Custom-made AI trading card by LootCard AI.<br><br>Production and delivery usually takes about 30 days.<br><br>Final design will follow the confirmed Discord conversation.";
+    const description = htmlDescription(input.description);
     const price = input.price ?? defaultPrice();
     const tags = input.tags?.length ? input.tags : defaultTags();
-    const endpoint = `https://${storeDomain}/admin/api/${apiVersion}/products.json`;
 
-    const payload = {
-      product: {
-        title,
-        body_html: description,
-        vendor: "LootCard AI",
-        product_type: "Custom AI Card",
-        status: "active",
-        tags: tags.join(","),
-        variants: [
-          {
-            price: price.toFixed(2),
-            inventory_management: null,
-            taxable: true
+    console.log("[Shopify Product Create Start]", {
+      shop: shopRecord.shop,
+      title,
+      price,
+      tags
+    });
+
+    const createMutation = `
+      mutation CreateProduct($input: ProductCreateInput!) {
+        productCreate(product: $input) {
+          product {
+            id
+            title
+            handle
+            onlineStoreUrl
+            variants(first: 1) {
+              nodes {
+                id
+                price
+              }
+            }
           }
-        ]
+          userErrors {
+            field
+            message
+          }
+        }
+      }
+    `;
+
+    const createVariables = {
+      input: {
+        title,
+        descriptionHtml: description,
+        vendor: "LootCard AI",
+        productType: "Custom AI Card",
+        tags,
+        status: "ACTIVE"
       }
     };
 
     try {
+      const endpoint = `https://${shopRecord.shop}/admin/api/${shopifyApiVersion()}/graphql.json`;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "X-Shopify-Access-Token": accessToken,
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": tokenContext.accessToken
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          query: createMutation,
+          variables: createVariables
+        })
       });
 
-      const rawText = await response.text();
-      if (!response.ok) {
+      const text = await response.text();
+      if (response.status === 401 || response.status === 403) {
+        const reauthorizeUrl = await shopifyAuthService.markShopForReauthorization(shopRecord.shop);
         return {
           ok: false,
-          error: `Shopify create product failed: ${response.status} ${rawText}`
+          shop: shopRecord.shop,
+          reauthorizeUrl,
+          error: `Shopify token is no longer valid for ${shopRecord.shop}. Reauthorization is required.`
         };
       }
 
-      const data = JSON.parse(rawText) as {
-        product?: {
-          id?: number | string;
-          handle?: string;
-          admin_graphql_api_id?: string;
+      if (!response.ok) {
+        return {
+          ok: false,
+          shop: shopRecord.shop,
+          error: `Shopify GraphQL create product failed: ${response.status} ${text}`
+        };
+      }
+
+      const parsed = JSON.parse(text) as {
+        data?: {
+          productCreate?: {
+            product?: {
+              id?: string;
+              title?: string;
+              handle?: string;
+              onlineStoreUrl?: string | null;
+              variants?: {
+                nodes?: Array<{
+                  id?: string;
+                  price?: string;
+                }>;
+              };
+            };
+            userErrors?: Array<{ message: string }>;
+          };
         };
       };
 
-      const handle = data.product?.handle || slugify(title);
-      const productId = String(data.product?.id || "");
-      const productUrl = `https://${storeDomain}/products/${handle}`;
-      const adminUrl = productId
-        ? `https://${storeDomain}/admin/products/${productId}`
-        : `https://${storeDomain}/admin/products`;
+      const userErrors = parsed.data?.productCreate?.userErrors || [];
+      if (userErrors.length > 0) {
+        return {
+          ok: false,
+          shop: shopRecord.shop,
+          error: userErrors.map((item) => item.message).join("; ")
+        };
+      }
+
+      const product = parsed.data?.productCreate?.product;
+      const productId = product?.id || "";
+      const variantId = product?.variants?.nodes?.[0]?.id || "";
+
+      if (productId && variantId) {
+        const updateVariantMutation = `
+          mutation UpdateVariantPrice($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+              productVariants {
+                id
+                price
+              }
+              userErrors {
+                field
+                message
+              }
+            }
+          }
+        `;
+
+        const updateVariantResponse = await fetch(endpoint, {
+          method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": tokenContext.accessToken
+            },
+          body: JSON.stringify({
+            query: updateVariantMutation,
+            variables: {
+              productId,
+              variants: [
+                {
+                  id: variantId,
+                  price: price.toFixed(2)
+                }
+              ]
+            }
+          })
+        });
+
+        const updateVariantText = await updateVariantResponse.text();
+        if (!updateVariantResponse.ok) {
+          console.log("[Shopify Product Create Result]", updateVariantText);
+          return {
+            ok: false,
+            shop: shopRecord.shop,
+            error: `Shopify variant update failed: ${updateVariantResponse.status} ${updateVariantText}`
+          };
+        }
+
+        const updateVariantParsed = JSON.parse(updateVariantText) as {
+          data?: {
+            productVariantsBulkUpdate?: {
+              userErrors?: Array<{ message: string }>;
+            };
+          };
+        };
+
+        const updateVariantErrors = updateVariantParsed.data?.productVariantsBulkUpdate?.userErrors || [];
+        if (updateVariantErrors.length > 0) {
+          return {
+            ok: false,
+            shop: shopRecord.shop,
+            error: updateVariantErrors.map((item) => item.message).join("; ")
+          };
+        }
+      }
+
+      if (productId) {
+        const publicationQuery = `
+          query GetPublications {
+            publications(first: 20) {
+              nodes {
+                id
+                name
+              }
+            }
+          }
+        `;
+
+        const publicationResponse = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": tokenContext.accessToken
+          },
+          body: JSON.stringify({ query: publicationQuery })
+        });
+
+        const publicationText = await publicationResponse.text();
+        if (publicationResponse.ok) {
+          const publicationParsed = JSON.parse(publicationText) as {
+            data?: {
+              publications?: {
+                nodes?: Array<{ id?: string; name?: string }>;
+              };
+            };
+          };
+
+          const onlineStorePublication = (publicationParsed.data?.publications?.nodes || []).find((item) =>
+            (item.name || "").toLowerCase().includes("online store")
+          );
+
+          if (onlineStorePublication?.id) {
+            const publishMutation = `
+              mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
+                publishablePublish(id: $id, input: $input) {
+                  publishable {
+                    ... on Product {
+                      id
+                    }
+                  }
+                  shop {
+                    id
+                  }
+                  userErrors {
+                    field
+                    message
+                  }
+                }
+              }
+            `;
+
+            const publishResponse = await fetch(endpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": tokenContext.accessToken
+              },
+              body: JSON.stringify({
+                query: publishMutation,
+                variables: {
+                  id: productId,
+                  input: [
+                    {
+                      publicationId: onlineStorePublication.id
+                    }
+                  ]
+                }
+              })
+            });
+
+            const publishText = await publishResponse.text();
+            console.log("[Shopify Product Create Result]", publishText);
+          }
+        }
+      }
+
+      const handle = product?.handle || titleHandle(title);
+      const productUrl = product?.onlineStoreUrl || `https://${shopRecord.shop}/products/${handle}`;
+      const adminNumericId = productId.split("/").pop() || "";
+      const adminUrl = adminNumericId
+        ? `https://${shopRecord.shop}/admin/products/${adminNumericId}`
+        : `https://${shopRecord.shop}/admin/products`;
+
+      console.log("[Shopify Product URL]", productUrl);
+      console.log("[Shopify Product Create Result]", {
+        ok: true,
+        productId,
+        variantId,
+        handle,
+        productUrl,
+        price
+      });
 
       return {
         ok: true,
         productId,
+        variantId,
         handle,
         productUrl,
         adminUrl,
         price,
-        title
+        title,
+        shop: shopRecord.shop
       };
     } catch (error) {
+      console.log("[Shopify Product Create Result]", error);
       return {
         ok: false,
+        shop: shopRecord.shop,
         error: error instanceof Error ? error.message : String(error)
       };
     }

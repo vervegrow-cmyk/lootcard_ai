@@ -2,6 +2,7 @@ import { createProductSkill } from "../skills/shopify/create-product.skill";
 import { OrchestratorPlan } from "../types/agent.types";
 import { SkillExecutionContext, SkillExecutionResult } from "../types/skill.types";
 import { isShopifyConfigured, shopifyService } from "../services/shopify.service";
+import { shopifyAuthService } from "../services/shopify-auth.service";
 
 export class ShopifyWorkflowAgent {
   async execute(plan: OrchestratorPlan, context: SkillExecutionContext): Promise<SkillExecutionResult> {
@@ -33,10 +34,7 @@ export class ShopifyWorkflowAgent {
         replyData: {
           type: "shopify_not_configured",
           ok: false,
-          missing: [
-            !process.env.SHOPIFY_STORE_DOMAIN?.trim() ? "SHOPIFY_STORE_DOMAIN" : "",
-            !process.env.SHOPIFY_ADMIN_ACCESS_TOKEN?.trim() ? "SHOPIFY_ADMIN_ACCESS_TOKEN" : ""
-          ].filter(Boolean)
+          missing: shopifyAuthService.getMissingOAuthEnv()
         }
       };
       console.log("[Shopify Create Product Result]", result.replyData);
@@ -68,6 +66,7 @@ export class ShopifyWorkflowAgent {
           replyData: {
             type: "shopify_product_created",
             ok: true,
+            shop: created.shop,
             productUrl: created.productUrl,
             adminUrl: created.adminUrl,
             price: created.price,
@@ -82,7 +81,10 @@ export class ShopifyWorkflowAgent {
           replyData: {
             type: "shopify_product_create_failed",
             ok: false,
-            error: created.error
+            error: created.error,
+            missing: created.missing,
+            reauthorizeUrl: created.reauthorizeUrl,
+            shop: created.shop
           }
         };
 

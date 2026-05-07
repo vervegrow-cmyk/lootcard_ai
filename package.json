@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "node ./node_modules/tsx/dist/cli.mjs watch src/index.ts",
-    "build": "prisma generate && tsc",
+    "build": "node ./node_modules/prisma/build/index.js generate && node ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "npx prisma db push && node dist/index.js",
     "provider:health-check": "node ./scripts/provider-health-check.js",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate",
@@ -17,11 +17,21 @@
     "node": ">=18.18.0"
   },
   "dependencies": {
+    "@remix-run/express": "latest",
+    "@remix-run/node": "latest",
+    "@remix-run/react": "latest",
+    "@shopify/app-bridge-react": "latest",
+    "@shopify/polaris": "latest",
+    "@shopify/shopify-api": "latest",
+    "@shopify/shopify-app-remix": "latest",
+    "@shopify/shopify-app-session-storage-prisma": "latest",
     "@anthropic-ai/sdk": "^0.39.0",
     "@prisma/client": "^6.19.3",
     "discord.js": "^14.19.3",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "react": "latest",
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/express": "^5.0.1",

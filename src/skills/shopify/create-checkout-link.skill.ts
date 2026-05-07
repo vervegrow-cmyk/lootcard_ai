@@ -1,11 +1,9 @@
 import { orderService } from "../../services/order.service";
+import { isShopifyConfigured } from "../../services/shopify.service";
 import { SkillExecutionContext, SkillExecutionResult } from "../../types/skill.types";
 
 function hasShopifyConfig(): boolean {
-  return Boolean(
-    process.env.SHOPIFY_STORE_DOMAIN?.trim() &&
-      process.env.SHOPIFY_ADMIN_ACCESS_TOKEN?.trim()
-  );
+  return isShopifyConfigured();
 }
 
 export class CreateCheckoutLinkSkill {

@@ -183,9 +183,12 @@ MOCK_IMAGE_MODE=true
 DISCORD_BOT_TOKEN=
 DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/cardforge_ai?schema=public
 
-SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
-SHOPIFY_ADMIN_ACCESS_TOKEN=
-SHOPIFY_API_VERSION=2025-10
+SHOPIFY_STORE_DOMAIN=clearance-sale-dekuch.myshopify.com
+SHOPIFY_API_KEY=
+SHOPIFY_API_SECRET=
+SHOPIFY_APP_URL=https://lootcardai-production.up.railway.app
+SHOPIFY_SCOPES=write_products,read_products,read_orders
+SHOPIFY_API_VERSION=2026-04
 DEFAULT_CARD_PRICE=29.99
 
 AI_PROVIDER_ORDER=anthropic,openai,openrouter,kimi,deepseek,dashscope,zhipu,google,xai

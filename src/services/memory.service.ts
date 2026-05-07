@@ -1,4 +1,4 @@
-import { CardStyleOption, ConversationLog, PrismaClient } from "@prisma/client";
+import { CardStyleOption, ConversationLog } from "@prisma/client";
 import {
   ConversationEntry,
   EMPTY_HERMES_MEMORY,
@@ -9,8 +9,7 @@ import {
   ProjectStage,
   UserMemorySnapshot
 } from "../types";
-
-const prisma = new PrismaClient();
+import { prisma } from "./prisma.service";
 
 interface LocalProjectState {
   discordUserId: string;

@@ -19,7 +19,7 @@ export type OrchestratorIntent =
   | "select_image"
   | "revise_image"
   | "confirm_design"
-  | "create_shopify_link"
+  | "create_shopify_product_link"
   | "language_preference"
   | "general_chat";
 
@@ -45,6 +45,7 @@ export type TargetSkill =
   | "expand-prompt"
   | "image-prompt"
   | "create-product"
+  | "create-product-link"
   | "create-checkout-link"
   | "send-payment-link"
   | "save-user-preference"

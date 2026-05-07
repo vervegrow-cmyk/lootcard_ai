@@ -179,9 +179,9 @@ export class HermesOrchestratorAgent {
 
     if (wantsShopifyLink || (detectConfirm(input.message) && input.memory.currentPrompt)) {
       return basePlan({
-        intent: "create_shopify_link",
+        intent: "create_shopify_product_link",
         targetAgent: "shopify",
-        targetSkill: "create-product",
+        targetSkill: "create-product-link",
         action: "create_shopify_product",
         language,
         stage: "payment",

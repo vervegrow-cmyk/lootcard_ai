@@ -92,3 +92,28 @@ model ConversationLog {
 
   @@index([discordUserId, createdAt])
 }
+
+model ShopifyShop {
+  id                 String   @id @default(cuid())
+  shop               String   @unique
+  accessToken        String
+  scope              String?
+  installedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  webhookStatus      String   @default("pending")
+  webhookTopics      String   @default("")
+  reauthorizeRequired Boolean @default(false)
+
+  @@index([installedAt])
+}
+
+model ShopifyOAuthState {
+  id        String   @id @default(cuid())
+  shop      String
+  state     String   @unique
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([shop, createdAt])
+  @@index([expiresAt])
+}
