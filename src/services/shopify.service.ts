@@ -1,5 +1,6 @@
 import { ShopifyProductDraft, ShopifyProductResult } from "../types";
 import { shopifyAuthService } from "./shopify-auth.service";
+import { createShopifyProductGraphql } from "./shopify/createProduct";
 
 export interface CreateShopifyProductInput {
   title?: string;
@@ -50,15 +51,6 @@ function htmlDescription(input?: string): string {
       "Final design will follow the confirmed Discord conversation."
     ].join("<br><br>")
   );
-}
-
-function titleHandle(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
 }
 
 export function isShopifyConfigured(): boolean {
@@ -130,56 +122,18 @@ export class ShopifyService {
       tags
     });
 
-    const createMutation = `
-      mutation CreateProduct($input: ProductCreateInput!) {
-        productCreate(product: $input) {
-          product {
-            id
-            title
-            handle
-            onlineStoreUrl
-            variants(first: 1) {
-              nodes {
-                id
-                price
-              }
-            }
-          }
-          userErrors {
-            field
-            message
-          }
-        }
-      }
-    `;
-
-    const createVariables = {
-      input: {
+    try {
+      const created = await createShopifyProductGraphql({
+        shop: shopRecord.shop,
+        accessToken: tokenContext.accessToken,
+        apiVersion: shopifyApiVersion(),
         title,
         descriptionHtml: description,
-        vendor: "LootCard AI",
-        productType: "Custom AI Card",
-        tags,
-        status: "ACTIVE"
-      }
-    };
-
-    try {
-      const endpoint = `https://${shopRecord.shop}/admin/api/${shopifyApiVersion()}/graphql.json`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Shopify-Access-Token": tokenContext.accessToken
-        },
-        body: JSON.stringify({
-          query: createMutation,
-          variables: createVariables
-        })
+        price,
+        tags
       });
 
-      const text = await response.text();
-      if (response.status === 401 || response.status === 403) {
+      if (!created.ok && /401|403|Reauthorization/i.test(created.error || "")) {
         const reauthorizeUrl = await shopifyAuthService.markShopForReauthorization(shopRecord.shop);
         return {
           ok: false,
@@ -188,218 +142,12 @@ export class ShopifyService {
           error: `Shopify token is no longer valid for ${shopRecord.shop}. Reauthorization is required.`
         };
       }
-
-      if (!response.ok) {
-        return {
-          ok: false,
-          shop: shopRecord.shop,
-          error: `Shopify GraphQL create product failed: ${response.status} ${text}`
-        };
+      if (created.productUrl) {
+        console.log("[Shopify Product URL]", created.productUrl);
       }
-
-      const parsed = JSON.parse(text) as {
-        data?: {
-          productCreate?: {
-            product?: {
-              id?: string;
-              title?: string;
-              handle?: string;
-              onlineStoreUrl?: string | null;
-              variants?: {
-                nodes?: Array<{
-                  id?: string;
-                  price?: string;
-                }>;
-              };
-            };
-            userErrors?: Array<{ message: string }>;
-          };
-        };
-      };
-
-      const userErrors = parsed.data?.productCreate?.userErrors || [];
-      if (userErrors.length > 0) {
-        return {
-          ok: false,
-          shop: shopRecord.shop,
-          error: userErrors.map((item) => item.message).join("; ")
-        };
-      }
-
-      const product = parsed.data?.productCreate?.product;
-      const productId = product?.id || "";
-      const variantId = product?.variants?.nodes?.[0]?.id || "";
-
-      if (productId && variantId) {
-        const updateVariantMutation = `
-          mutation UpdateVariantPrice($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-              productVariants {
-                id
-                price
-              }
-              userErrors {
-                field
-                message
-              }
-            }
-          }
-        `;
-
-        const updateVariantResponse = await fetch(endpoint, {
-          method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Shopify-Access-Token": tokenContext.accessToken
-            },
-          body: JSON.stringify({
-            query: updateVariantMutation,
-            variables: {
-              productId,
-              variants: [
-                {
-                  id: variantId,
-                  price: price.toFixed(2)
-                }
-              ]
-            }
-          })
-        });
-
-        const updateVariantText = await updateVariantResponse.text();
-        if (!updateVariantResponse.ok) {
-          console.log("[Shopify Product Create Result]", updateVariantText);
-          return {
-            ok: false,
-            shop: shopRecord.shop,
-            error: `Shopify variant update failed: ${updateVariantResponse.status} ${updateVariantText}`
-          };
-        }
-
-        const updateVariantParsed = JSON.parse(updateVariantText) as {
-          data?: {
-            productVariantsBulkUpdate?: {
-              userErrors?: Array<{ message: string }>;
-            };
-          };
-        };
-
-        const updateVariantErrors = updateVariantParsed.data?.productVariantsBulkUpdate?.userErrors || [];
-        if (updateVariantErrors.length > 0) {
-          return {
-            ok: false,
-            shop: shopRecord.shop,
-            error: updateVariantErrors.map((item) => item.message).join("; ")
-          };
-        }
-      }
-
-      if (productId) {
-        const publicationQuery = `
-          query GetPublications {
-            publications(first: 20) {
-              nodes {
-                id
-                name
-              }
-            }
-          }
-        `;
-
-        const publicationResponse = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": tokenContext.accessToken
-          },
-          body: JSON.stringify({ query: publicationQuery })
-        });
-
-        const publicationText = await publicationResponse.text();
-        if (publicationResponse.ok) {
-          const publicationParsed = JSON.parse(publicationText) as {
-            data?: {
-              publications?: {
-                nodes?: Array<{ id?: string; name?: string }>;
-              };
-            };
-          };
-
-          const onlineStorePublication = (publicationParsed.data?.publications?.nodes || []).find((item) =>
-            (item.name || "").toLowerCase().includes("online store")
-          );
-
-          if (onlineStorePublication?.id) {
-            const publishMutation = `
-              mutation PublishProduct($id: ID!, $input: [PublicationInput!]!) {
-                publishablePublish(id: $id, input: $input) {
-                  publishable {
-                    ... on Product {
-                      id
-                    }
-                  }
-                  shop {
-                    id
-                  }
-                  userErrors {
-                    field
-                    message
-                  }
-                }
-              }
-            `;
-
-            const publishResponse = await fetch(endpoint, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Shopify-Access-Token": tokenContext.accessToken
-              },
-              body: JSON.stringify({
-                query: publishMutation,
-                variables: {
-                  id: productId,
-                  input: [
-                    {
-                      publicationId: onlineStorePublication.id
-                    }
-                  ]
-                }
-              })
-            });
-
-            const publishText = await publishResponse.text();
-            console.log("[Shopify Product Create Result]", publishText);
-          }
-        }
-      }
-
-      const handle = product?.handle || titleHandle(title);
-      const productUrl = product?.onlineStoreUrl || `https://${shopRecord.shop}/products/${handle}`;
-      const adminNumericId = productId.split("/").pop() || "";
-      const adminUrl = adminNumericId
-        ? `https://${shopRecord.shop}/admin/products/${adminNumericId}`
-        : `https://${shopRecord.shop}/admin/products`;
-
-      console.log("[Shopify Product URL]", productUrl);
-      console.log("[Shopify Product Create Result]", {
-        ok: true,
-        productId,
-        variantId,
-        handle,
-        productUrl,
-        price
-      });
-
+      console.log("[Shopify Product Create Result]", created);
       return {
-        ok: true,
-        productId,
-        variantId,
-        handle,
-        productUrl,
-        adminUrl,
-        price,
-        title,
+        ...created,
         shop: shopRecord.shop
       };
     } catch (error) {

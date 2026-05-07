@@ -45,6 +45,7 @@ export type TargetSkill =
   | "expand-prompt"
   | "image-prompt"
   | "create-product"
+  | "create-shopify-product"
   | "create-product-link"
   | "create-checkout-link"
   | "send-payment-link"

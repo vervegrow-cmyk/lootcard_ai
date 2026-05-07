@@ -15,6 +15,25 @@ function defaultProduct() {
   };
 }
 
+function requestedProductTitle(context: SkillExecutionContext): string {
+  const clean = (value: string): string =>
+    value
+      .replace(/的?\s*shopify.*$/i, "")
+      .replace(/的?\s*(商品|产品|链接).*$/i, "")
+      .trim();
+
+  const fromPlan = String(context.data?.requestedProductTitle || "").trim();
+  if (fromPlan) {
+    return clean(fromPlan);
+  }
+
+  const match =
+    context.message.match(/商品名(?:为|是)?\s*["“]?(.+?)["”]?(?=(?:的)?\s*(?:shopify|商品|产品|product|链接)|$)/i) ||
+    context.message.match(/product\s+name\s*(?:is|=|:)?\s*["']?([^"']+?)["']?/i);
+
+  return match?.[1] ? clean(match[1]) : "";
+}
+
 export class CreateProductSkill {
   async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
     const hasDesignContext = Boolean(
@@ -24,6 +43,7 @@ export class CreateProductSkill {
         context.memory.theme?.trim()
     );
 
+    const explicitTitle = requestedProductTitle(context);
     const selectedImage = {
       id: context.memory.selectedOption || "DEFAULT",
       title: context.memory.selectedOptionTitle || context.memory.selectedDesignSummary || "Final Design",
@@ -48,18 +68,24 @@ export class CreateProductSkill {
         })
       : defaultProduct();
 
+    if (explicitTitle) {
+      product.title = explicitTitle;
+    }
+
     return {
       reply: "",
       stage: "payment",
-      actions: ["create-product"],
+      actions: ["create-shopify-product"],
       product,
       data: {
         project,
-        hasDesignContext
+        hasDesignContext,
+        requestedProductTitle: explicitTitle
       },
       replyData: {
         type: "shopify_product_draft",
-        hasDesignContext
+        hasDesignContext,
+        requestedProductTitle: explicitTitle
       }
     };
   }

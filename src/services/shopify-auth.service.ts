@@ -18,6 +18,7 @@ export interface ShopifyWebhookPayload {
 export interface ShopifyTokenRecord {
   shop: string;
   accessToken: string;
+  scope?: string | null;
   webhookStatus: string;
   reauthorizeRequired: boolean;
 }
@@ -135,6 +136,7 @@ function toTokenRecord(session: ShopifySession, shopMeta?: ShopifyShop | null): 
   return {
     shop: session.shop,
     accessToken: session.accessToken,
+    scope: session.scope,
     webhookStatus: shopMeta?.webhookStatus || "pending",
     reauthorizeRequired: shopMeta?.reauthorizeRequired || false
   };
@@ -308,11 +310,13 @@ export class ShopifyAuthService {
     await prisma.shopifySession.upsert({
       where: { shop: params.shop },
       update: {
-        accessToken: params.accessToken
+        accessToken: params.accessToken,
+        scope: params.scope
       },
       create: {
         shop: params.shop,
-        accessToken: params.accessToken
+        accessToken: params.accessToken,
+        scope: params.scope
       }
     });
 

@@ -15,7 +15,7 @@ export class ShopifyWorkflowAgent {
       const result: SkillExecutionResult = {
         reply: "",
         stage: "payment",
-        actions: ["create-product", "missing-product-draft"],
+        actions: ["create-shopify-product", "missing-product-draft"],
         replyData: {
           type: "shopify_product_missing",
           ok: false
@@ -29,7 +29,7 @@ export class ShopifyWorkflowAgent {
       const result: SkillExecutionResult = {
         reply: "",
         stage: "payment",
-        actions: ["create-product", "shopify-not-configured"],
+        actions: ["create-shopify-product", "shopify-not-configured"],
         product: draft,
         replyData: {
           type: "shopify_not_configured",
@@ -52,10 +52,11 @@ export class ShopifyWorkflowAgent {
       ? {
           reply: "",
           stage: "payment",
-          actions: ["create-product", "shopify-product-created"],
+          actions: ["create-shopify-product", "shopify-product-created"],
           product: draft,
           data: {
             project: draftResult.data?.project,
+            productId: created.productId,
             productUrl: created.productUrl,
             adminUrl: created.adminUrl
           },
@@ -67,6 +68,7 @@ export class ShopifyWorkflowAgent {
             type: "shopify_product_created",
             ok: true,
             shop: created.shop,
+            productId: created.productId,
             productUrl: created.productUrl,
             adminUrl: created.adminUrl,
             price: created.price,
@@ -76,7 +78,7 @@ export class ShopifyWorkflowAgent {
       : {
           reply: "",
           stage: "payment",
-          actions: ["create-product", "shopify-product-failed"],
+          actions: ["create-shopify-product", "shopify-product-failed"],
           product: draft,
           replyData: {
             type: "shopify_product_create_failed",

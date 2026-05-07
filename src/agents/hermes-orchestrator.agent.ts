@@ -38,19 +38,52 @@ function detectQuestion(message: string): boolean {
 
 function detectShopifyLinkRequest(message: string): boolean {
   const lower = message.toLowerCase();
+  const hasShopify = lower.includes("shopify");
+  const hasProductLinkWord =
+    /\u94fe\u63a5|\u5546\u54c1|\u4ea7\u54c1|\u521b\u5efa\u5546\u54c1|\u4e0b\u5355|\u4ed8\u6b3e|\u8d2d\u4e70/.test(message) ||
+    includesAny(lower, ["link", "product", "create product", "checkout", "payment"]);
   return (
     /shopify[\s-]*link/.test(lower) ||
     /checkout\s*link/.test(lower) ||
     /payment\s*link/.test(lower) ||
     /product\s*link/.test(lower) ||
+    /create\s*product/.test(lower) ||
+    /\bproduct\b/.test(lower) ||
+    (hasShopify && hasProductLinkWord) ||
     /\u6211\u8981\u4e0b\u5355/.test(message) ||
     /shopify[\s-]*\u94fe\u63a5/.test(lower) ||
     /\u4e0b\u5355\u94fe\u63a5/.test(message) ||
     /\u4ed8\u6b3e\u94fe\u63a5/.test(message) ||
     /\u652f\u4ed8\u94fe\u63a5/.test(message) ||
     /\u8d2d\u4e70\u94fe\u63a5/.test(message) ||
-    /\u751f\u6210\u94fe\u63a5/.test(message)
+    /\u751f\u6210\u94fe\u63a5/.test(message) ||
+    /\u521b\u5efa\u5546\u54c1/.test(message)
   );
+}
+
+function extractProductTitle(message: string): string {
+  const clean = (value: string): string =>
+    value
+      .replace(/的?\s*shopify.*$/i, "")
+      .replace(/的?\s*(商品|产品|链接).*$/i, "")
+      .trim();
+
+  const trimmed = message.trim();
+  const cnMatch =
+    trimmed.match(/商品名(?:为|是)?\s*["“]?(.+?)["”]?(?=(?:的)?\s*(?:shopify|商品|产品|product|链接)|$)/i) ||
+    trimmed.match(/创建商品(?:名)?(?:为|是)?\s*["“]?(.+?)["”]?(?=(?:的)?\s*(?:shopify|商品|产品|product|链接)|$)/i);
+  if (cnMatch?.[1]) {
+    return clean(cnMatch[1]);
+  }
+
+  const enMatch =
+    trimmed.match(/product\s+name\s*(?:is|=|:)?\s*["']?([^"']+?)["']?(?:\s+shopify|\s+product|\s+link)?$/i) ||
+    trimmed.match(/create\s+(?:a\s+)?product\s+(?:named|called)\s*["']?([^"']+?)["']?$/i);
+  if (enMatch?.[1]) {
+    return clean(enMatch[1]);
+  }
+
+  return "";
 }
 
 function detectSelection(message: string): string | null {
@@ -156,6 +189,7 @@ export class HermesOrchestratorAgent {
     const selectedOption = detectSelection(input.message);
     const preferredLanguage = detectLanguagePreference(input.message);
     const wantsShopifyLink = detectShopifyLinkRequest(input.message);
+    const requestedProductTitle = extractProductTitle(input.message);
     const wantsDirectGenerate = detectDirectGenerate(input.message) || detectCannotGenerate(input.message);
     const userRejectedMoreQuestions =
       detectRefuseMoreQuestions(input.message) && hasCharacterSignal(input.message, input.memory.character);
@@ -181,7 +215,7 @@ export class HermesOrchestratorAgent {
       return basePlan({
         intent: "create_shopify_product_link",
         targetAgent: "shopify",
-        targetSkill: "create-product-link",
+        targetSkill: "create-shopify-product",
         action: "create_shopify_product",
         language,
         stage: "payment",
@@ -190,7 +224,10 @@ export class HermesOrchestratorAgent {
           language === "zh"
             ? "用户想要 Shopify 链接。请基于工具结果自然说明是否可以生成链接；如果还缺最终确认设计，要清楚说明原因，并引导用户先生成或确认一张卡牌方案。"
             : "The user wants a Shopify link. Use the tool result to explain naturally whether a link can be created; if a final confirmed design is missing, explain that clearly and guide the user to generate or confirm a card design first.",
-        reason: wantsShopifyLink ? "shopify link keywords detected in user message" : "final confirmation with current prompt detected"
+        reason: wantsShopifyLink ? "shopify link or create product keywords detected in user message" : "final confirmation with current prompt detected",
+        data: {
+          requestedProductTitle
+        }
       });
     }
 
