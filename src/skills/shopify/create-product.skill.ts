@@ -4,15 +4,24 @@ import { SkillExecutionContext, SkillExecutionResult } from "../../types/skill.t
 function defaultProduct() {
   return {
     title: "Custom AI Trading Card",
-    description: [
-      "Custom-made AI trading card by LootCard AI.",
-      "Production and delivery usually takes about 30 days.",
-      "Final design will follow the confirmed Discord conversation."
-    ].join("\n"),
+    description: "Custom product created from Discord order request.",
     price: process.env.DEFAULT_CARD_PRICE || "29.99",
-    sku: `CARD-${Date.now()}`,
-    tags: ["custom-card", "ai-card", "discord-order", "lootcard"]
+    sku: `DISCORD-${Date.now()}`,
+    tags: ["discord-order", "lootcard-ai"]
   };
+}
+
+function requestedPrice(context: SkillExecutionContext): string {
+  const explicit = String(context.data?.requestedProductPrice || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  const match =
+    context.message.match(/价格\s*[:：]?\s*(\d+(?:\.\d{1,2})?)/i) ||
+    context.message.match(/price\s*[:=]?\s*(\d+(?:\.\d{1,2})?)/i);
+
+  return match?.[1] || "";
 }
 
 function requestedProductTitle(context: SkillExecutionContext): string {
@@ -72,6 +81,11 @@ export class CreateProductSkill {
       product.title = explicitTitle;
     }
 
+    const explicitPrice = requestedPrice(context);
+    if (explicitPrice) {
+      product.price = explicitPrice;
+    }
+
     return {
       reply: "",
       stage: "payment",
@@ -80,12 +94,14 @@ export class CreateProductSkill {
       data: {
         project,
         hasDesignContext,
-        requestedProductTitle: explicitTitle
+        requestedProductTitle: explicitTitle,
+        requestedProductPrice: explicitPrice
       },
       replyData: {
         type: "shopify_product_draft",
         hasDesignContext,
-        requestedProductTitle: explicitTitle
+        requestedProductTitle: explicitTitle,
+        requestedProductPrice: explicitPrice
       }
     };
   }

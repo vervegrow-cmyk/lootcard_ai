@@ -53,6 +53,37 @@ function classifyProcessingError(error: unknown): string {
   return "Kimi AI 当前回复失败，请查看 Railway 日志。";
 }
 
+function formatCurrency(value?: number): string {
+  const amount = Number(value ?? process.env.DEFAULT_CARD_PRICE ?? "29.99");
+  return Number.isFinite(amount) ? amount.toFixed(2) : "29.99";
+}
+
+function buildShopifyDiscordReply(params: {
+  ok: boolean;
+  title?: string;
+  price?: number;
+  productUrl?: string;
+  adminUrl?: string;
+  productId?: string;
+  error?: string;
+}): string {
+  if (!params.ok) {
+    return `Shopify 产品创建失败：${params.error || "未知错误"}`;
+  }
+
+  return [
+    "✅ Shopify 产品已创建",
+    "",
+    `商品名：${params.title || "Custom AI Trading Card"}`,
+    `价格：$${formatCurrency(params.price)}`,
+    `商品ID：${params.productId || "-"}`,
+    `下单链接：${params.productUrl || "-"}`,
+    `后台链接：${params.adminUrl || "-"}`,
+    "",
+    "你可以点击下单链接直接购买。"
+  ].join("\n");
+}
+
 function toProjectMemory(memory: {
   language: "zh" | "en";
   stage: string;
@@ -199,6 +230,7 @@ export class DiscordBot {
           recentConversation
         });
 
+        console.log("[INTENT]", plan.intent);
         console.log("[Hermes Intent]", plan.intent);
         console.log("[Target Agent]", plan.targetAgent);
         console.log("[Target Skill]", plan.targetSkill);
@@ -231,8 +263,7 @@ export class DiscordBot {
             stage: plan.stage,
             actions: ["tool-error"],
             data: {
-              toolError:
-                toolError instanceof Error ? toolError.message : String(toolError)
+              toolError: toolError instanceof Error ? toolError.message : String(toolError)
             },
             replyData: {
               errorType: "tool_error"
@@ -250,21 +281,51 @@ export class DiscordBot {
         }
 
         let finalReply = "";
-        try {
-          console.log("[Calling Kimi Final Reply]", true);
-          finalReply = await replyAgent.generateReply({
-            userMessage: inbound.content,
-            memory: {
-              ...skillContext.memory,
-              ...(merged.memoryUpdate || {})
-            },
-            history: recentConversation,
-            result: merged
+        const shopifyReplyData = merged.skillResult?.replyData || {};
+        const isDirectShopifyReply = plan.intent === "create_shopify_product_link";
+
+        if (
+          isDirectShopifyReply &&
+          typeof shopifyReplyData === "object" &&
+          shopifyReplyData &&
+          (
+            shopifyReplyData.type === "shopify_product_created" ||
+            shopifyReplyData.type === "shopify_product_create_failed" ||
+            shopifyReplyData.type === "shopify_not_configured" ||
+            shopifyReplyData.type === "shopify_product_missing"
+          )
+        ) {
+          finalReply = buildShopifyDiscordReply({
+            ok: Boolean(shopifyReplyData.ok),
+            title: String(shopifyReplyData.title || ""),
+            price: Number(shopifyReplyData.price || process.env.DEFAULT_CARD_PRICE || "29.99"),
+            productUrl: String(shopifyReplyData.productUrl || ""),
+            adminUrl: String(shopifyReplyData.adminUrl || ""),
+            productId: String(shopifyReplyData.productId || ""),
+            error: String(
+              shopifyReplyData.error ||
+                (Array.isArray(shopifyReplyData.missing) && shopifyReplyData.missing.length > 0
+                  ? `缺少配置: ${shopifyReplyData.missing.join(", ")}`
+                  : "未知错误")
+            )
           });
-          console.log("[Kimi Final Reply]", finalReply);
-        } catch (error) {
-          console.error("[Kimi Reply Error]", error);
-          finalReply = "Kimi AI 当前回复失败，请查看 Railway 日志。";
+        } else {
+          try {
+            console.log("[Calling Kimi Final Reply]", true);
+            finalReply = await replyAgent.generateReply({
+              userMessage: inbound.content,
+              memory: {
+                ...skillContext.memory,
+                ...(merged.memoryUpdate || {})
+              },
+              history: recentConversation,
+              result: merged
+            });
+            console.log("[Kimi Final Reply]", finalReply);
+          } catch (error) {
+            console.error("[Kimi Reply Error]", error);
+            finalReply = "Kimi AI 当前回复失败，请查看 Railway 日志。";
+          }
         }
 
         await memoryWorkflowAgent.persist({
@@ -285,6 +346,9 @@ export class DiscordBot {
         }
 
         try {
+          if (isDirectShopifyReply && merged.skillResult?.replyData?.productUrl) {
+            console.log("[DISCORD] sending product URL", merged.skillResult.replyData.productUrl);
+          }
           await message.reply(finalReply);
         } catch (replyError) {
           logger.error("Failed to send Discord reply", replyError);

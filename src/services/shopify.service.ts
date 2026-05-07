@@ -8,6 +8,9 @@ export interface CreateShopifyProductInput {
   price?: number;
   tags?: string[];
   shop?: string;
+  vendor?: string;
+  productType?: string;
+  sku?: string;
 }
 
 export interface CreateShopifyProductOutput {
@@ -53,6 +56,10 @@ function htmlDescription(input?: string): string {
   );
 }
 
+function discordOrderDescription(input?: string): string {
+  return input?.trim() || "Custom product created from Discord order request.";
+}
+
 export function isShopifyConfigured(): boolean {
   return shopifyAuthService.isOAuthConfigured();
 }
@@ -63,6 +70,7 @@ export class ShopifyService {
   }
 
   async getShopifyToken(shop?: string): Promise<{ shop: string; accessToken: string } | null> {
+    console.log("[SHOPIFY] loading session", shop || "primary");
     const shopRecord =
       (shop ? await shopifyAuthService.getShopByDomain(shop) : null) ||
       (await shopifyAuthService.getPrimaryShop());
@@ -115,7 +123,7 @@ export class ShopifyService {
     const price = input.price ?? defaultPrice();
     const tags = input.tags?.length ? input.tags : defaultTags();
 
-    console.log("[Shopify Product Create Start]", {
+    console.log("[SHOPIFY] creating product", {
       shop: shopRecord.shop,
       title,
       price,
@@ -130,7 +138,10 @@ export class ShopifyService {
         title,
         descriptionHtml: description,
         price,
-        tags
+        tags,
+        vendor: input.vendor,
+        productType: input.productType,
+        sku: input.sku
       });
 
       if (!created.ok && /401|403|Reauthorization/i.test(created.error || "")) {
@@ -145,6 +156,7 @@ export class ShopifyService {
       if (created.productUrl) {
         console.log("[Shopify Product URL]", created.productUrl);
       }
+      console.log("[SHOPIFY] product created", created);
       console.log("[Shopify Product Create Result]", created);
       return {
         ...created,
@@ -158,6 +170,24 @@ export class ShopifyService {
         error: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+
+  async createShopifyProductFromDiscord(input: {
+    title?: string;
+    price?: number;
+    description?: string;
+    shop?: string;
+  }): Promise<CreateShopifyProductOutput> {
+    return this.createShopifyProduct({
+      shop: input.shop,
+      title: input.title?.trim() || "Custom AI Trading Card",
+      price: input.price ?? defaultPrice(),
+      description: discordOrderDescription(input.description),
+      vendor: "LootCard AI",
+      productType: "Custom Product",
+      tags: ["discord-order", "lootcard-ai"],
+      sku: `DISCORD-${Date.now()}`
+    });
   }
 
   async createProduct(product: ShopifyProductDraft): Promise<ShopifyProductResult> {

@@ -6,6 +6,9 @@ export interface ShopifyGraphqlCreateProductInput {
   descriptionHtml: string;
   price: number;
   tags: string[];
+  vendor?: string;
+  productType?: string;
+  sku?: string;
 }
 
 export interface ShopifyGraphqlCreateProductResult {
@@ -36,6 +39,7 @@ interface ProductCreateData {
         nodes?: Array<{
           id?: string;
           price?: string;
+          sku?: string;
         }>;
       };
     };
@@ -99,6 +103,7 @@ export async function createShopifyProductGraphql(
             nodes {
               id
               price
+              sku
             }
           }
         }
@@ -119,8 +124,8 @@ export async function createShopifyProductGraphql(
       input: {
         title: input.title,
         descriptionHtml: input.descriptionHtml,
-        vendor: "LootCard AI",
-        productType: "Custom AI Card",
+        vendor: input.vendor || "LootCard AI",
+        productType: input.productType || "Custom Product",
         tags: input.tags,
         status: "ACTIVE"
       }
@@ -187,6 +192,7 @@ export async function createShopifyProductGraphql(
           {
             id: variantId,
             price: input.price.toFixed(2),
+            sku: input.sku || `DISCORD-${Date.now()}`,
             inventoryPolicy: "CONTINUE",
             taxable: true
           }
@@ -267,8 +273,9 @@ export async function createShopifyProductGraphql(
   const handle = product?.handle || titleHandle(input.title);
   const productUrl = product?.onlineStoreUrl || `https://${input.shop}/products/${handle}`;
   const adminNumericId = productId.split("/").pop() || "";
+  const adminStoreSlug = input.shop.replace(/\.myshopify\.com$/i, "");
   const adminUrl = adminNumericId
-    ? `https://${input.shop}/admin/products/${adminNumericId}`
+    ? `https://admin.shopify.com/store/${adminStoreSlug}/products/${adminNumericId}`
     : `https://${input.shop}/admin/products`;
 
   return {

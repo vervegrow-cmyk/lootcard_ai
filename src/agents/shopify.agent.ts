@@ -41,11 +41,10 @@ export class ShopifyWorkflowAgent {
       return result;
     }
 
-    const created = await shopifyService.createShopifyProduct({
+    const created = await shopifyService.createShopifyProductFromDiscord({
       title: draft.title,
       description: draft.description,
-      price: Number(draft.price || process.env.DEFAULT_CARD_PRICE || "29.99"),
-      tags: draft.tags
+      price: Number(draft.price || process.env.DEFAULT_CARD_PRICE || "29.99")
     });
 
     const result: SkillExecutionResult = created.ok

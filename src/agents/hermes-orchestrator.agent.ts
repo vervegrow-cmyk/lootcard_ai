@@ -16,11 +16,14 @@ function detectLanguage(message: string, fallback: "zh" | "en"): "zh" | "en" {
 function detectLanguagePreference(message: string): "zh" | "en" | null {
   const lower = message.toLowerCase();
   if (
-    /以后用中文|能反馈中文么|请用中文回复|中文回复/.test(message)
+    /\u4ee5\u540e\u7528\u4e2d\u6587|\u80fd\u53cd\u9988\u4e2d\u6587\u4e48|\u8bf7\u7528\u4e2d\u6587\u56de\u590d|\u4e2d\u6587\u56de\u590d/.test(message)
   ) {
     return "zh";
   }
-  if (includesAny(lower, ["use english", "reply in english", "please use english"]) || /请用英文|英文回复/.test(message)) {
+  if (
+    includesAny(lower, ["use english", "reply in english", "please use english"]) ||
+    /\u8bf7\u7528\u82f1\u6587|\u82f1\u6587\u56de\u590d/.test(message)
+  ) {
     return "en";
   }
   return null;
@@ -30,48 +33,51 @@ function detectQuestion(message: string): boolean {
   const lower = message.toLowerCase().trim();
   return (
     message.trim().endsWith("?") ||
-    message.trim().endsWith("？") ||
+    message.trim().endsWith("\uFF1F") ||
     includesAny(lower, ["what", "how", "can you", "why", "price", "delivery"]) ||
-    /你能|是什么|怎么|为什么|价格|多久|发货|售后/.test(message)
+    /\u4f60\u80fd|\u662f\u4ec0\u4e48|\u600e\u4e48|\u4e3a\u4ec0\u4e48|\u4ef7\u683c|\u591a\u4e45|\u53d1\u8d27|\u552e\u540e/.test(message)
   );
 }
 
 function detectShopifyLinkRequest(message: string): boolean {
   const lower = message.toLowerCase();
-  const hasShopify = lower.includes("shopify");
-  const hasProductLinkWord =
-    /\u94fe\u63a5|\u5546\u54c1|\u4ea7\u54c1|\u521b\u5efa\u5546\u54c1|\u4e0b\u5355|\u4ed8\u6b3e|\u8d2d\u4e70/.test(message) ||
-    includesAny(lower, ["link", "product", "create product", "checkout", "payment"]);
   return (
     /shopify[\s-]*link/.test(lower) ||
     /checkout\s*link/.test(lower) ||
     /payment\s*link/.test(lower) ||
     /product\s*link/.test(lower) ||
     /create\s*product/.test(lower) ||
-    /\bproduct\b/.test(lower) ||
-    (hasShopify && hasProductLinkWord) ||
-    /\u6211\u8981\u4e0b\u5355/.test(message) ||
-    /shopify[\s-]*\u94fe\u63a5/.test(lower) ||
+    /create\s*shopify\s*product/.test(lower) ||
+    /\u0073hopify\u94fe\u63a5/i.test(message) ||
+    /\u4ea7\u54c1\u94fe\u63a5/.test(message) ||
+    /\u5546\u54c1\u94fe\u63a5/.test(message) ||
     /\u4e0b\u5355\u94fe\u63a5/.test(message) ||
-    /\u4ed8\u6b3e\u94fe\u63a5/.test(message) ||
-    /\u652f\u4ed8\u94fe\u63a5/.test(message) ||
     /\u8d2d\u4e70\u94fe\u63a5/.test(message) ||
-    /\u751f\u6210\u94fe\u63a5/.test(message) ||
-    /\u521b\u5efa\u5546\u54c1/.test(message)
+    /\u652f\u4ed8\u94fe\u63a5/.test(message) ||
+    /\u4ed8\u6b3e\u94fe\u63a5/.test(message) ||
+    /\u521b\u5efa\u5546\u54c1/.test(message) ||
+    /\u521b\u5efa\u4ea7\u54c1/.test(message) ||
+    /\u6211\u8981\u4e0b\u5355/.test(message) ||
+    (/\u521b\u5efa/.test(message) && /\u94fe\u63a5/.test(message))
   );
 }
 
 function extractProductTitle(message: string): string {
   const clean = (value: string): string =>
     value
-      .replace(/的?\s*shopify.*$/i, "")
-      .replace(/的?\s*(商品|产品|链接).*$/i, "")
+      .replace(/\s*\u7684?\s*shopify.*$/i, "")
+      .replace(/\s*\u7684?\s*(\u5546\u54c1|\u4ea7\u54c1|\u94fe\u63a5).*$/i, "")
+      .replace(/\s*(\u4ef7\u683c|price)\s*[:\uFF1A=].*$/i, "")
       .trim();
 
   const trimmed = message.trim();
   const cnMatch =
-    trimmed.match(/商品名(?:为|是)?\s*["“]?(.+?)["”]?(?=(?:的)?\s*(?:shopify|商品|产品|product|链接)|$)/i) ||
-    trimmed.match(/创建商品(?:名)?(?:为|是)?\s*["“]?(.+?)["”]?(?=(?:的)?\s*(?:shopify|商品|产品|product|链接)|$)/i);
+    trimmed.match(/\u5546\u54c1\u540d(?:\u4e3a|\u662f)?\s*["“]?(.+?)["”]?(?=(?:\u7684?\s*(?:shopify|\u5546\u54c1|\u4ea7\u54c1|\u94fe\u63a5)|$))/i) ||
+    trimmed.match(/\u4ea7\u54c1\u540d(?:\u4e3a|\u662f)?\s*["“]?(.+?)["”]?(?=(?:\u7684?\s*(?:shopify|\u5546\u54c1|\u4ea7\u54c1|\u94fe\u63a5)|$))/i) ||
+    trimmed.match(/\u5e2e\u6211\u521b\u5efa(?:\u4e00\u4e2a)?(.+?)(?:\u94fe\u63a5|\u5546\u54c1|\u4ea7\u54c1)(?:\uFF0C|,|\u3002|$)/i) ||
+    trimmed.match(/\u7ed9\u6211(?:\u4e00\u4e2a)?(.+?)(?:shopify|\u5546\u54c1|\u4ea7\u54c1)\u94fe\u63a5/i) ||
+    trimmed.match(/\u521b\u5efa(?:\u4e00\u4e2a)?(.+?)(?:\u94fe\u63a5|\u5546\u54c1|\u4ea7\u54c1)(?:\uFF0C|,|\u3002|$)/i);
+
   if (cnMatch?.[1]) {
     return clean(cnMatch[1]);
   }
@@ -79,11 +85,25 @@ function extractProductTitle(message: string): string {
   const enMatch =
     trimmed.match(/product\s+name\s*(?:is|=|:)?\s*["']?([^"']+?)["']?(?:\s+shopify|\s+product|\s+link)?$/i) ||
     trimmed.match(/create\s+(?:a\s+)?product\s+(?:named|called)\s*["']?([^"']+?)["']?$/i);
+
   if (enMatch?.[1]) {
     return clean(enMatch[1]);
   }
 
   return "";
+}
+
+function extractProductPrice(message: string): number | null {
+  const match =
+    message.match(/\u4ef7\u683c\s*[:\uFF1A]?\s*(\d+(?:\.\d{1,2})?)/i) ||
+    message.match(/price\s*[:=]?\s*(\d+(?:\.\d{1,2})?)/i);
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const price = Number(match[1]);
+  return Number.isFinite(price) && price > 0 ? price : null;
 }
 
 function detectSelection(message: string): string | null {
@@ -98,7 +118,7 @@ function detectRevision(message: string): boolean {
   const lower = message.toLowerCase();
   return (
     includesAny(lower, ["too bright", "too dark", "add more gold", "change background", "revise"]) ||
-    /太亮|太暗|加金色|换背景|换风格|改图|更酷|更性感|更像收藏卡/.test(message)
+    /\u592a\u4eae|\u592a\u6697|\u52a0\u91d1\u8272|\u6362\u80cc\u666f|\u6362\u98ce\u683c|\u6539\u56fe|\u66f4\u9177|\u66f4\u6027\u611f|\u66f4\u50cf\u6536\u85cf\u5361/.test(message)
   );
 }
 
@@ -106,7 +126,7 @@ function detectDirectGenerate(message: string): boolean {
   const lower = message.toLowerCase();
   return (
     includesAny(lower, ["just generate", "generate now", "don't ask", "no questions"]) ||
-    /直接出图|直接生成|不要问|不要废话|帮我做一个|生成一个|出图/.test(message)
+    /\u76f4\u63a5\u51fa\u56fe|\u76f4\u63a5\u751f\u6210|\u4e0d\u8981\u95ee|\u4e0d\u8981\u5e9f\u8bdd|\u5e2e\u6211\u505a\u4e00\u4e2a|\u751f\u6210\u4e00\u4e2a|\u51fa\u56fe/.test(message)
   );
 }
 
@@ -114,7 +134,7 @@ function detectGenerate(message: string): boolean {
   const lower = message.toLowerCase();
   return (
     includesAny(lower, ["generate", "image", "art", "card"]) ||
-    /生成|卡牌|图片|图像|人造人18|人造人18号|人造人十八号|海贼王|女王|赛博朋克|黑金/.test(message)
+    /\u751f\u6210|\u5361\u724c|\u56fe\u7247|\u56fe\u50cf|\u4eba\u9020\u4eba18|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u6d77\u8d3c\u738b|\u5973\u738b|\u8d5b\u535a\u670b\u514b|\u9ed1\u91d1/.test(message)
   );
 }
 
@@ -122,27 +142,27 @@ function detectPromptPolish(message: string): boolean {
   const lower = message.toLowerCase();
   return (
     includesAny(lower, ["polish prompt", "optimize prompt", "refine prompt"]) ||
-    /润色提示词|优化prompt|优化这个prompt|帮我润色提示词|把这个提示词变专业/.test(message)
+    /\u6da6\u8272\u63d0\u793a\u8bcd|\u4f18\u5316prompt|\u4f18\u5316\u8fd9\u4e2aprompt|\u5e2e\u6211\u6da6\u8272\u63d0\u793a\u8bcd|\u628a\u8fd9\u4e2a\u63d0\u793a\u8bcd\u53d8\u4e13\u4e1a/.test(message)
   );
 }
 
 function detectAfterSales(message: string): boolean {
   const lower = message.toLowerCase();
-  return includesAny(lower, ["after sales", "refund", "order status", "shipping"]) || /售后|退款|订单|发货|进度/.test(message);
+  return includesAny(lower, ["after sales", "refund", "order status", "shipping"]) || /\u552e\u540e|\u9000\u6b3e|\u8ba2\u5355|\u53d1\u8d27|\u8fdb\u5ea6/.test(message);
 }
 
 function detectConfirm(message: string): boolean {
   const lower = message.toLowerCase();
-  return includesAny(lower, ["confirm", "create link"]) || /确认|就这个|可以下单/.test(message);
+  return includesAny(lower, ["confirm", "create link"]) || /\u786e\u8ba4|\u5c31\u8fd9\u4e2a|\u53ef\u4ee5\u4e0b\u5355/.test(message);
 }
 
 function detectCannotGenerate(message: string): boolean {
   const lower = message.toLowerCase();
-  return includesAny(lower, ["can you generate images", "can't you generate"]) || /你是不能出图么|你不能出图吗/.test(message);
+  return includesAny(lower, ["can you generate images", "can't you generate"]) || /\u4f60\u662f\u4e0d\u80fd\u51fa\u56fe\u4e48|\u4f60\u4e0d\u80fd\u51fa\u56fe\u5417/.test(message);
 }
 
 function detectRefuseMoreQuestions(message: string): boolean {
-  return /没有其他要求|没有要求|随便|直接要图|就要|不要反复|不要问|直接生成|角色卡牌|图片/.test(message);
+  return /\u6ca1\u6709\u5176\u4ed6\u8981\u6c42|\u6ca1\u6709\u8981\u6c42|\u968f\u4fbf|\u76f4\u63a5\u8981\u56fe|\u5c31\u8981|\u4e0d\u8981\u53cd\u590d|\u4e0d\u8981\u95ee|\u76f4\u63a5\u751f\u6210|\u89d2\u8272\u5361\u724c|\u56fe\u7247/.test(message);
 }
 
 function hasCharacterSignal(message: string, memoryCharacter: string): boolean {
@@ -150,7 +170,7 @@ function hasCharacterSignal(message: string, memoryCharacter: string): boolean {
   return Boolean(
     memoryCharacter ||
       includesAny(lower, ["android 18"]) ||
-      /人造人18|人造人18号|人造人十八号|角色卡牌|女王|海贼王/.test(message)
+      /\u4eba\u9020\u4eba18|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u89d2\u8272\u5361\u724c|\u5973\u738b|\u6d77\u8d3c\u738b/.test(message)
   );
 }
 
@@ -190,6 +210,7 @@ export class HermesOrchestratorAgent {
     const preferredLanguage = detectLanguagePreference(input.message);
     const wantsShopifyLink = detectShopifyLinkRequest(input.message);
     const requestedProductTitle = extractProductTitle(input.message);
+    const requestedProductPrice = extractProductPrice(input.message);
     const wantsDirectGenerate = detectDirectGenerate(input.message) || detectCannotGenerate(input.message);
     const userRejectedMoreQuestions =
       detectRefuseMoreQuestions(input.message) && hasCharacterSignal(input.message, input.memory.character);
@@ -205,7 +226,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language: preferredLanguage },
         replyInstruction:
           preferredLanguage === "zh"
-            ? "用户要求之后用中文沟通。请自然确认你之后会用中文回复，并简短说明可以继续告诉你需求。"
+            ? "The user asked to continue in Chinese. Confirm naturally in Chinese and invite the next request."
             : "The user asked to switch to English. Confirm naturally that you will continue in English and invite the next request.",
         reason: "language preference request detected"
       });
@@ -222,11 +243,12 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户想要 Shopify 链接。请基于工具结果自然说明是否可以生成链接；如果还缺最终确认设计，要清楚说明原因，并引导用户先生成或确认一张卡牌方案。"
-            : "The user wants a Shopify link. Use the tool result to explain naturally whether a link can be created; if a final confirmed design is missing, explain that clearly and guide the user to generate or confirm a card design first.",
+            ? "The user wants a direct Shopify checkout link. If product creation succeeds, clearly provide the title, price, product ID, storefront URL, and admin URL in Chinese. If it fails, clearly explain the exact Shopify error in Chinese."
+            : "The user wants a direct Shopify product link. If product creation succeeds, clearly provide the title, price, product ID, storefront URL, and admin URL. If it fails, clearly explain the exact Shopify error.",
         reason: wantsShopifyLink ? "shopify link or create product keywords detected in user message" : "final confirmation with current prompt detected",
         data: {
-          requestedProductTitle
+          requestedProductTitle,
+          requestedProductPrice
         }
       });
     }
@@ -242,7 +264,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户选择了一个方案。请自然确认已选中的 A/B/C 方案，总结这个方案，并告诉用户可以继续修改或确认下单。"
+            ? "The user selected an option. Confirm the chosen A/B/C option in Chinese, summarize it, and say they can revise it or confirm checkout."
             : "The user selected an option. Confirm naturally which A/B/C option was chosen, summarize it, and tell the user they can keep revising it or confirm checkout.",
         reason: `user selected option ${selectedOption}`,
         data: {
@@ -262,7 +284,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户在修改方案。请根据工具结果自然说明这次修改了哪些点、当前方案朝什么方向调整，并邀请用户继续给反馈或确认。"
+            ? "The user is revising the design. Explain in Chinese what changed and invite more feedback or confirmation."
             : "The user is revising the design. Based on the tool result, explain naturally what changed, how the design direction shifted, and invite more feedback or confirmation.",
         reason: "revision keywords detected and an active design exists"
       });
@@ -280,7 +302,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户明确要求直接出图。请积极自然地说明你已经直接给出 3 个方案，不要再追问风格，并引导用户回复 A/B/C 或继续提修改意见。"
+            ? "The user explicitly wants direct generation. Respond in Chinese that 3 options were generated directly and invite A/B/C or revision feedback."
             : "The user explicitly wants direct generation. Respond proactively that you generated 3 options without more follow-up questions, and guide them to reply with A/B/C or revision feedback.",
         reason: wantsDirectGenerate ? "direct generate keywords detected" : "user rejected more questions and character signal exists",
         data: {
@@ -302,7 +324,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户想生成卡牌方案。请根据工具结果自然介绍 3 个方案，并引导用户选择 A/B/C 或继续修改。"
+            ? "The user wants card design options. Introduce the 3 generated options naturally in Chinese and invite A/B/C or revisions."
             : "The user wants card design options. Introduce the 3 generated options naturally and invite the user to choose A/B/C or request revisions.",
         reason: "design or image generation keywords detected"
       });
@@ -319,7 +341,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户想润色提示词。请自然输出原始描述、优化后的提示词和简短说明，不要把对话带去 Shopify 或其他流程。"
+            ? "The user wants prompt polishing. Present the original idea, improved prompt, and short explanation in Chinese."
             : "The user wants prompt polishing. Present the original idea, the improved prompt, and a short explanation naturally, without switching to Shopify or other flows.",
         reason: "prompt polish request detected"
       });
@@ -336,13 +358,13 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "这是售后相关问题。请基于工具结果用自然客服口吻直接回答。"
+            ? "This is an after-sales request. Answer directly in Chinese using a natural support tone."
             : "This is an after-sales request. Answer it directly in a natural support tone based on the tool result.",
         reason: "after-sales keywords detected"
       });
     }
 
-    if (/价格/.test(input.message) || input.message.toLowerCase().includes("price")) {
+    if (/\u4ef7\u683c/.test(input.message) || input.message.toLowerCase().includes("price")) {
       return basePlan({
         intent: "customer_service",
         targetAgent: "customer-service",
@@ -353,13 +375,13 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户在问价格。请自然解释价格和数量、复杂度、是否实体卡有关，不要虚构固定报价。"
+            ? "The user is asking about pricing. Explain in Chinese that price depends on quantity, complexity, and whether it is a physical card."
             : "The user is asking about pricing. Explain naturally that pricing depends on quantity, complexity, and whether it is a physical card, without inventing a fixed quote.",
         reason: "pricing question detected"
       });
     }
 
-    if (/多久|30天/.test(input.message) || input.message.toLowerCase().includes("delivery")) {
+    if (/\u591a\u4e45|30\u5929/.test(input.message) || input.message.toLowerCase().includes("delivery")) {
       return basePlan({
         intent: "customer_service",
         targetAgent: "customer-service",
@@ -370,7 +392,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户在问交付周期。请自然解释这是定制商品，预计大约 30 天到货，不要做额外承诺。"
+            ? "The user is asking about delivery time. Explain in Chinese that custom production and delivery usually takes about 30 days."
             : "The user is asking about delivery. Explain naturally that this is a custom product and the estimated production and delivery time is around 30 days, without making extra promises.",
         reason: "delivery question detected"
       });
@@ -387,7 +409,7 @@ export class HermesOrchestratorAgent {
         memoryUpdate: { language },
         replyInstruction:
           language === "zh"
-            ? "用户在普通提问。请用自然客服口吻直接回答，并简短说明你还能帮他做什么。"
+            ? "The user is asking a general question. Answer directly in Chinese and briefly mention what else you can help with."
             : "The user is asking a general question. Answer directly in a natural support tone and briefly mention what else you can help with.",
         reason: "general question detected"
       });
@@ -403,7 +425,7 @@ export class HermesOrchestratorAgent {
       memoryUpdate: { language },
       replyInstruction:
         language === "zh"
-          ? "这是普通聊天。请自然问候并说明你可以帮助答疑、润色提示词、出图、改图和生成 Shopify 链接。"
+          ? "This is general chat. Greet the user naturally in Chinese and explain that you can help with questions, prompt polishing, image generation, image revision, and Shopify links."
           : "This is general chat. Greet the user naturally and explain that you can help with questions, prompt polishing, image generation, image revision, and Shopify links.",
       reason: "fallback general chat route"
     });
