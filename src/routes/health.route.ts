@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { Request, Response, Router } from "express";
 import { shopifyAuthService } from "../services/shopify-auth.service";
 
@@ -115,7 +116,7 @@ function appShellHtml(params: {
     <main class="shell">
       <section class="card">
         <div class="badge ${params.shopifyConfigured ? "" : "warn"}">
-          ${params.shopifyConfigured ? "Shopify Connected" : "Shopify Not Connected"}
+          ${params.shopifyConfigured ? "Shopify Connected ✅" : "Shopify Not Connected"}
         </div>
         <h1>LootCard AI Shopify App</h1>
         <p>LootCard AI Shopify App is running.</p>
@@ -154,7 +155,7 @@ async function renderHome(req: Request, res: Response): Promise<void> {
 
   res.status(200).type("html").send(
     appShellHtml({
-      shop: status.shop,
+      shop: status.connectedShop,
       shopifyConfigured: status.shopifyConfigured,
       webhooks: status.webhooks,
       apiStatus: status.apiStatus,
@@ -175,9 +176,8 @@ healthRouter.get("/health", (req, res, next) => {
     const status = await shopifyAuthService.getHealthStatus(requestedShop || null);
     res.status(200).json({
       ok: true,
-      service: "lootcard-ai",
       shopifyConfigured: status.shopifyConfigured,
-      shop: status.shop,
+      connectedShop: status.connectedShop,
       webhooks: status.webhooks
     });
   })().catch(next);
@@ -194,15 +194,33 @@ healthRouter.get("/auth/shopify", (req, res, next) => {
       return;
     }
 
-    const authUrl = await shopifyAuthService.createInstallUrl(shop);
+    const state = crypto.randomBytes(16).toString("hex");
+    res.cookie("shopify_oauth_state", state, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      path: "/",
+      maxAge: 10 * 60 * 1000
+    });
+
+    const authUrl = shopifyAuthService.createInstallUrl(shop, state);
     res.status(200).type("html").send(embeddedRedirectHtml(authUrl));
   })().catch(next);
 });
 
 healthRouter.get("/auth/callback", (req, res, next) => {
   void (async () => {
+    const cookieState = typeof req.cookies?.shopify_oauth_state === "string" ? req.cookies.shopify_oauth_state : "";
+    const queryState = typeof req.query.state === "string" ? req.query.state : "";
+    shopifyAuthService.validateOAuthCallbackState(cookieState, queryState);
     const callbackUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
     const result = await shopifyAuthService.handleOAuthCallback(callbackUrl);
+    res.clearCookie("shopify_oauth_state", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      path: "/"
+    });
     res.redirect(result.redirectUrl);
   })().catch(next);
 });

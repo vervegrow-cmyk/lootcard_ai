@@ -101,14 +101,13 @@ CREATE TABLE "ShopifyShop" (
 );
 
 -- CreateTable
-CREATE TABLE "ShopifyOAuthState" (
+CREATE TABLE "shopify_sessions" (
     "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
-    "state" TEXT NOT NULL,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "access_token" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "ShopifyOAuthState_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "shopify_sessions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -136,13 +135,7 @@ CREATE UNIQUE INDEX "ShopifyShop_shop_key" ON "ShopifyShop"("shop");
 CREATE INDEX "ShopifyShop_installedAt_idx" ON "ShopifyShop"("installedAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "ShopifyOAuthState_state_key" ON "ShopifyOAuthState"("state");
-
--- CreateIndex
-CREATE INDEX "ShopifyOAuthState_shop_createdAt_idx" ON "ShopifyOAuthState"("shop", "createdAt");
-
--- CreateIndex
-CREATE INDEX "ShopifyOAuthState_expiresAt_idx" ON "ShopifyOAuthState"("expiresAt");
+CREATE UNIQUE INDEX "shopify_sessions_shop_key" ON "shopify_sessions"("shop");
 
 -- AddForeignKey
 ALTER TABLE "CardStyleOption" ADD CONSTRAINT "CardStyleOption_cardProjectId_fkey" FOREIGN KEY ("cardProjectId") REFERENCES "CardProject"("id") ON DELETE CASCADE ON UPDATE CASCADE;

@@ -17,6 +17,8 @@
     "node": ">=18.18.0"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@prisma/client": "^6.19.3",
     "@remix-run/express": "latest",
     "@remix-run/node": "latest",
     "@remix-run/react": "latest",
@@ -25,8 +27,8 @@
     "@shopify/shopify-api": "latest",
     "@shopify/shopify-app-remix": "latest",
     "@shopify/shopify-app-session-storage-prisma": "latest",
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@prisma/client": "^6.19.3",
+    "@types/cookie-parser": "^1.4.10",
+    "cookie-parser": "^1.4.7",
     "discord.js": "^14.19.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

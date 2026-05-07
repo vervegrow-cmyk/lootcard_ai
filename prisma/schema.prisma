@@ -107,13 +107,11 @@ model ShopifyShop {
   @@index([installedAt])
 }
 
-model ShopifyOAuthState {
-  id        String   @id @default(cuid())
-  shop      String
-  state     String   @unique
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+model ShopifySession {
+  id          String   @id @default(cuid())
+  shop        String   @unique
+  accessToken String   @map("access_token")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  @@index([shop, createdAt])
-  @@index([expiresAt])
+  @@map("shopify_sessions")
 }

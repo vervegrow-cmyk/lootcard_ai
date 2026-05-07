@@ -1,10 +1,10 @@
 import crypto from "crypto";
-import { ShopifyShop } from "@prisma/client";
+import { ShopifySession, ShopifyShop } from "@prisma/client";
 import { prisma } from "./prisma.service";
 
 export interface ShopifyHealthStatus {
   shopifyConfigured: boolean;
-  shop: string | null;
+  connectedShop: string | null;
   webhooks: boolean;
   apiStatus: "connected" | "reauthorize_required" | "not_installed" | "not_configured";
 }
@@ -13,6 +13,13 @@ export interface ShopifyWebhookPayload {
   topic: string;
   shop: string;
   payload: unknown;
+}
+
+export interface ShopifyTokenRecord {
+  shop: string;
+  accessToken: string;
+  webhookStatus: string;
+  reauthorizeRequired: boolean;
 }
 
 function env(name: string): string {
@@ -52,17 +59,9 @@ function shopifyScopes(): string {
   return env("SHOPIFY_SCOPES") || "write_products,read_products,read_orders";
 }
 
-function stateExpiryDate(): Date {
-  return new Date(Date.now() + 10 * 60 * 1000);
-}
-
 function buildQueryString(params: Record<string, string>): string {
   const search = new URLSearchParams(params);
   return search.toString();
-}
-
-function createNonce(length = 24): string {
-  return crypto.randomBytes(length).toString("hex");
 }
 
 function createQueryHmac(params: URLSearchParams): string {
@@ -78,7 +77,7 @@ function createQueryHmac(params: URLSearchParams): string {
     .digest("hex");
 }
 
-async function registerWebhookTopic(shop: ShopifyShop, topic: string, callbackUrl: string): Promise<void> {
+async function registerWebhookTopic(shop: string, accessToken: string, topic: string, callbackUrl: string): Promise<void> {
   const mutation = `
     mutation RegisterWebhook($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
       webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
@@ -95,11 +94,11 @@ async function registerWebhookTopic(shop: ShopifyShop, topic: string, callbackUr
     }
   `;
 
-  const response = await fetch(`https://${shop.shop}/admin/api/${shopifyApiVersion()}/graphql.json`, {
+  const response = await fetch(`https://${shop}/admin/api/${shopifyApiVersion()}/graphql.json`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": shop.accessToken
+      "X-Shopify-Access-Token": accessToken
     },
     body: JSON.stringify({
       query: mutation,
@@ -132,6 +131,15 @@ async function registerWebhookTopic(shop: ShopifyShop, topic: string, callbackUr
   }
 }
 
+function toTokenRecord(session: ShopifySession, shopMeta?: ShopifyShop | null): ShopifyTokenRecord {
+  return {
+    shop: session.shop,
+    accessToken: session.accessToken,
+    webhookStatus: shopMeta?.webhookStatus || "pending",
+    reauthorizeRequired: shopMeta?.reauthorizeRequired || false
+  };
+}
+
 export class ShopifyAuthService {
   isOAuthConfigured(): boolean {
     return Boolean(shopifyApiKey() && shopifyApiSecret() && shopifyAppUrl());
@@ -145,22 +153,41 @@ export class ShopifyAuthService {
     ].filter(Boolean);
   }
 
-  async getPrimaryShop(): Promise<ShopifyShop | null> {
+  async getPrimaryShop(): Promise<ShopifyTokenRecord | null> {
     try {
-      return await prisma.shopifyShop.findFirst({
-        where: { reauthorizeRequired: false },
-        orderBy: { installedAt: "desc" }
+      const session = await prisma.shopifySession.findFirst({
+        orderBy: { createdAt: "desc" }
       });
+
+      if (!session) {
+        return null;
+      }
+
+      const shopMeta = await prisma.shopifyShop.findUnique({
+        where: { shop: session.shop }
+      });
+
+      return toTokenRecord(session, shopMeta);
     } catch {
       return null;
     }
   }
 
-  async getShopByDomain(shop: string): Promise<ShopifyShop | null> {
+  async getShopByDomain(shop: string): Promise<ShopifyTokenRecord | null> {
     try {
-      return await prisma.shopifyShop.findUnique({
+      const session = await prisma.shopifySession.findUnique({
         where: { shop }
       });
+
+      if (!session) {
+        return null;
+      }
+
+      const shopMeta = await prisma.shopifyShop.findUnique({
+        where: { shop }
+      });
+
+      return toTokenRecord(session, shopMeta);
     } catch {
       return null;
     }
@@ -170,35 +197,35 @@ export class ShopifyAuthService {
     if (!this.isOAuthConfigured()) {
       return {
         shopifyConfigured: false,
-        shop: preferredShop || null,
+        connectedShop: preferredShop || null,
         webhooks: false,
         apiStatus: "not_configured"
       };
     }
 
     const normalizedShop = preferredShop ? normalizeShopDomain(preferredShop) : null;
-    const shopRecord =
+    const tokenRecord =
       (normalizedShop ? await this.getShopByDomain(normalizedShop) : null) ||
       (await this.getPrimaryShop());
 
-    if (!shopRecord) {
+    if (!tokenRecord) {
       return {
         shopifyConfigured: false,
-        shop: normalizedShop,
+        connectedShop: normalizedShop,
         webhooks: false,
         apiStatus: "not_installed"
       };
     }
 
     return {
-      shopifyConfigured: !shopRecord.reauthorizeRequired,
-      shop: shopRecord.shop,
-      webhooks: shopRecord.webhookStatus === "registered",
-      apiStatus: shopRecord.reauthorizeRequired ? "reauthorize_required" : "connected"
+      shopifyConfigured: !tokenRecord.reauthorizeRequired,
+      connectedShop: tokenRecord.shop,
+      webhooks: tokenRecord.webhookStatus === "registered",
+      apiStatus: tokenRecord.reauthorizeRequired ? "reauthorize_required" : "connected"
     };
   }
 
-  async createInstallUrl(rawShop: string): Promise<string> {
+  createInstallUrl(rawShop: string, state: string): string {
     const shop = normalizeShopDomain(rawShop);
     if (!shop) {
       throw new Error("Invalid Shopify shop domain.");
@@ -207,15 +234,6 @@ export class ShopifyAuthService {
     if (!this.isOAuthConfigured()) {
       throw new Error(`Missing Shopify OAuth config: ${this.getMissingOAuthEnv().join(", ")}`);
     }
-
-    const state = createNonce();
-    await prisma.shopifyOAuthState.create({
-      data: {
-        shop,
-        state,
-        expiresAt: stateExpiryDate()
-      }
-    });
 
     const query = buildQueryString({
       client_id: shopifyApiKey(),
@@ -227,25 +245,22 @@ export class ShopifyAuthService {
     return `https://${shop}/admin/oauth/authorize?${query}`;
   }
 
-  async handleOAuthCallback(callbackUrl: string): Promise<{ shop: ShopifyShop; redirectUrl: string; webhooksRegistered: boolean }> {
+  validateOAuthCallbackState(cookieState: string | undefined, queryState: string): void {
+    if (!cookieState || !queryState || cookieState !== queryState) {
+      throw new Error("Invalid Shopify OAuth state");
+    }
+  }
+
+  validateOAuthCallbackHmac(callbackUrl: string): { shop: string; code: string; host: string } {
     const url = new URL(callbackUrl);
     const params = url.searchParams;
     const shop = normalizeShopDomain(params.get("shop") || "");
     const code = params.get("code") || "";
-    const state = params.get("state") || "";
     const hmac = params.get("hmac") || "";
     const host = params.get("host") || "";
 
-    if (!shop || !code || !state || !hmac) {
+    if (!shop || !code || !hmac) {
       throw new Error("Missing Shopify OAuth callback parameters.");
-    }
-
-    const storedState = await prisma.shopifyOAuthState.findUnique({
-      where: { state }
-    });
-
-    if (!storedState || storedState.shop !== shop || storedState.expiresAt.getTime() < Date.now()) {
-      throw new Error("Invalid or expired Shopify OAuth state.");
     }
 
     const expectedHmac = createQueryHmac(params);
@@ -253,7 +268,11 @@ export class ShopifyAuthService {
       throw new Error("Invalid Shopify OAuth HMAC.");
     }
 
-    const tokenResponse = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    return { shop, code, host };
+  }
+
+  async exchangeCodeForToken(params: { shop: string; code: string }): Promise<{ accessToken: string; scope: string }> {
+    const tokenResponse = await fetch(`https://${params.shop}/admin/oauth/access_token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -261,7 +280,7 @@ export class ShopifyAuthService {
       body: JSON.stringify({
         client_id: shopifyApiKey(),
         client_secret: shopifyApiSecret(),
-        code
+        code: params.code
       })
     });
 
@@ -279,36 +298,62 @@ export class ShopifyAuthService {
       throw new Error("Shopify OAuth token exchange did not return an access token.");
     }
 
-    const scopes = tokenData.scope || shopifyScopes();
+    return {
+      accessToken: tokenData.access_token,
+      scope: tokenData.scope || shopifyScopes()
+    };
+  }
 
-    const shopRecord = await prisma.shopifyShop.upsert({
-      where: { shop },
+  async saveAuthorizedShop(params: { shop: string; accessToken: string; scope: string }): Promise<void> {
+    await prisma.shopifySession.upsert({
+      where: { shop: params.shop },
       update: {
-        accessToken: tokenData.access_token,
-        scope: scopes,
+        accessToken: params.accessToken
+      },
+      create: {
+        shop: params.shop,
+        accessToken: params.accessToken
+      }
+    });
+
+    await prisma.shopifyShop.upsert({
+      where: { shop: params.shop },
+      update: {
+        accessToken: params.accessToken,
+        scope: params.scope,
         installedAt: new Date(),
         reauthorizeRequired: false
       },
       create: {
-        shop,
-        accessToken: tokenData.access_token,
-        scope: scopes,
+        shop: params.shop,
+        accessToken: params.accessToken,
+        scope: params.scope,
         installedAt: new Date(),
         reauthorizeRequired: false
       }
     });
+  }
 
-    await prisma.shopifyOAuthState.deleteMany({
-      where: { state }
+  async handleOAuthCallback(callbackUrl: string): Promise<{ shop: string; redirectUrl: string; webhooksRegistered: boolean }> {
+    const validated = this.validateOAuthCallbackHmac(callbackUrl);
+    const token = await this.exchangeCodeForToken({
+      shop: validated.shop,
+      code: validated.code
+    });
+
+    await this.saveAuthorizedShop({
+      shop: validated.shop,
+      accessToken: token.accessToken,
+      scope: token.scope
     });
 
     let webhooksRegistered = false;
     try {
-      await this.registerWebhooks(shopRecord);
+      await this.registerWebhooks(validated.shop, token.accessToken);
       webhooksRegistered = true;
     } catch (error) {
       await prisma.shopifyShop.update({
-        where: { shop },
+        where: { shop: validated.shop },
         data: {
           webhookStatus: "failed",
           webhookTopics: "",
@@ -319,35 +364,30 @@ export class ShopifyAuthService {
     }
 
     const redirectQuery = new URLSearchParams();
-    redirectQuery.set("shop", shop);
-    if (host) {
-      redirectQuery.set("host", host);
+    redirectQuery.set("shop", validated.shop);
+    if (validated.host) {
+      redirectQuery.set("host", validated.host);
     }
     redirectQuery.set("embedded", "1");
     redirectQuery.set("shopify_oauth", "success");
 
     return {
-      shop: shopRecord,
+      shop: validated.shop,
       redirectUrl: `${shopifyAppUrl()}/?${redirectQuery.toString()}`,
       webhooksRegistered
     };
   }
 
-  async registerWebhooks(shopRecord: ShopifyShop): Promise<void> {
-    const callbackUrl = `${shopifyAppUrl()}/webhooks`;
-    const topics = [
-      "APP_UNINSTALLED",
-      "PRODUCTS_CREATE",
-      "PRODUCTS_UPDATE",
-      "ORDERS_CREATE"
-    ];
+  async registerWebhooks(shop: string, accessToken: string): Promise<void> {
+    const callbackUrl = `${shopifyAppUrl()}/webhooks/shopify`;
+    const topics = ["APP_UNINSTALLED", "PRODUCTS_CREATE", "PRODUCTS_UPDATE", "ORDERS_CREATE"];
 
     for (const topic of topics) {
-      await registerWebhookTopic(shopRecord, topic, callbackUrl);
+      await registerWebhookTopic(shop, accessToken, topic, callbackUrl);
     }
 
     await prisma.shopifyShop.update({
-      where: { shop: shopRecord.shop },
+      where: { shop },
       data: {
         webhookStatus: "registered",
         webhookTopics: topics.join(","),
@@ -365,11 +405,7 @@ export class ShopifyAuthService {
       throw new Error("Missing Shopify webhook headers.");
     }
 
-    const digest = crypto
-      .createHmac("sha256", shopifyApiSecret())
-      .update(rawBody)
-      .digest("base64");
-
+    const digest = crypto.createHmac("sha256", shopifyApiSecret()).update(rawBody).digest("base64");
     const digestBuffer = Buffer.from(digest);
     const signatureBuffer = Buffer.from(signature);
 
@@ -377,23 +413,22 @@ export class ShopifyAuthService {
       throw new Error("Invalid Shopify webhook HMAC.");
     }
 
-    const payload = JSON.parse(rawBody.toString("utf8")) as unknown;
-    return { topic, shop, payload };
+    return {
+      topic,
+      shop,
+      payload: JSON.parse(rawBody.toString("utf8")) as unknown
+    };
   }
 
   async handleWebhook(payload: ShopifyWebhookPayload): Promise<void> {
     if (payload.topic === "APP_UNINSTALLED") {
-      try {
-        await prisma.shopifyShop.updateMany({
-          where: { shop: payload.shop },
-          data: {
-            reauthorizeRequired: true,
-            webhookStatus: "uninstalled"
-          }
-        });
-      } catch {
-        return;
-      }
+      await prisma.shopifyShop.updateMany({
+        where: { shop: payload.shop },
+        data: {
+          reauthorizeRequired: true,
+          webhookStatus: "uninstalled"
+        }
+      });
     }
   }
 
@@ -408,7 +443,7 @@ export class ShopifyAuthService {
       data: { reauthorizeRequired: true }
     });
 
-    return this.createInstallUrl(normalizedShop);
+    return `${shopifyAppUrl()}/auth/shopify?shop=${encodeURIComponent(normalizedShop)}`;
   }
 }
 

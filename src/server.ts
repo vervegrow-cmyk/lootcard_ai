@@ -1,3 +1,4 @@
+import cookieParser from "cookie-parser";
 import express from "express";
 import { discordBot } from "./bot/discord.bot";
 import { healthRouter } from "./routes/health.route";
@@ -8,7 +9,9 @@ export async function startServer(): Promise<void> {
   const app = express();
   const port = Number(process.env.PORT || 3000);
 
-  app.use("/webhooks", express.raw({ type: "*/*" }), webhookRouter);
+  app.set("trust proxy", 1);
+  app.use(cookieParser());
+  app.use("/webhooks/shopify", express.raw({ type: "*/*" }), webhookRouter);
   app.use(express.json());
   app.use("/", healthRouter);
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
