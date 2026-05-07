@@ -1,30 +1,38 @@
 import { ImageOption } from "../types";
-import { logger } from "../utils/logger";
 
-function buildMockTitle(index: number): string {
-  const titles = ["动漫SSR收藏卡", "黑金高级角色卡", "赛博战斗角色卡"];
-  return titles[index] || `Image Option ${index + 1}`;
+function env(name: string): string {
+  return process.env[name]?.trim() || "";
 }
 
-function buildMockSummary(index: number): string {
-  const summaries = [
-    "偏动漫收藏卡质感，角色主体突出，适合 SSR 稀有卡牌方向。",
-    "更偏黑金高级卡牌，边框奢华，适合高端收藏视觉。",
-    "更偏赛博战斗感，光效更强，适合未来感角色卡。"
-  ];
-  return summaries[index] || "Premium custom card image option.";
-}
-
-function buildMockPrompt(prompt: string, index: number): string {
-  const suffixes = [
-    "anime SSR collector card, premium foil finish",
-    "black gold premium character card, luxury border",
-    "cyber combat character card, neon battle atmosphere"
-  ];
-  return `${prompt}, ${suffixes[index] || "premium collectible illustration"}`;
+function imageConfigError(): Error {
+  return new Error("图片模型未配置，请配置 IMAGE_PROVIDER 和对应 API KEY。");
 }
 
 export class ImageService {
+  private getProvider(): string {
+    return env("IMAGE_PROVIDER").toLowerCase();
+  }
+
+  private ensureConfigured(): { provider: string; model: string; apiKey: string } {
+    const provider = this.getProvider();
+    console.log(`[IMAGE] provider=${provider || "unconfigured"}`);
+
+    if (!provider) {
+      throw imageConfigError();
+    }
+
+    if (provider === "kling") {
+      const apiKey = env("KLING_API_KEY");
+      const model = env("KLING_IMAGE_MODEL") || "kling-v1";
+      if (!apiKey) {
+        throw imageConfigError();
+      }
+      return { provider, model, apiKey };
+    }
+
+    throw new Error(`Unsupported IMAGE_PROVIDER: ${provider}`);
+  }
+
   async generateImages(
     input:
       | string
@@ -43,27 +51,14 @@ export class ImageService {
             size: "1024x1024"
           }
         : input;
-    const count = normalized.count ?? 3;
-    const mockMode = (process.env.MOCK_IMAGE_MODE || "true").toLowerCase() === "true";
-    const optionIds = ["A", "B", "C"];
 
-    if (!mockMode) {
-      logger.warn(
-        "Real image generation is not configured yet. Falling back to placeholder URLs. You can later connect Replicate, OpenAI Images, or Stable Diffusion."
-      );
+    const config = this.ensureConfigured();
+
+    if (config.provider === "kling") {
+      throw new Error(`Kling provider is configured with model ${config.model}, but live image generation is not implemented yet.`);
     }
 
-    return optionIds.slice(0, count).map((id, index) => {
-      const title = buildMockTitle(index);
-      const text = encodeURIComponent(`${id} ${title}`);
-      return {
-        id,
-        title,
-        imageUrl: `https://placehold.co/${normalized.size || "1024x1024"}/png?text=${text}`,
-        prompt: buildMockPrompt(normalized.prompt, index),
-        summary: buildMockSummary(index)
-      };
-    });
+    throw new Error(`Unsupported IMAGE_PROVIDER: ${config.provider}`);
   }
 
   async reviseImage(input: {
@@ -71,20 +66,8 @@ export class ImageService {
     prompt: string;
     revisionText: string;
   }): Promise<{ imageUrl: string; prompt: string; summary: string }> {
-    const mockMode = (process.env.MOCK_IMAGE_MODE || "true").toLowerCase() === "true";
-    const text = encodeURIComponent(`Revised ${input.revisionText}`);
-
-    if (!mockMode) {
-      logger.warn(
-        "Real image revision is not configured yet. Falling back to placeholder URLs. You can later connect Replicate, OpenAI Images, or Stable Diffusion."
-      );
-    }
-
-    return {
-      imageUrl: `https://placehold.co/1024x1024/png?text=${text}`,
-      prompt: `${input.prompt}, revision: ${input.revisionText}`,
-      summary: `Revised with: ${input.revisionText}`
-    };
+    const config = this.ensureConfigured();
+    throw new Error(`Image revision is not implemented for provider ${config.provider}.`);
   }
 
   async generateCardImages(input: {
@@ -92,13 +75,14 @@ export class ImageService {
     styleName: string;
     projectId: string;
   }): Promise<{ imageUrl: string }> {
-    const image = await this.generateImages({
+    const generated = await this.generateImages({
       prompt: `${input.imagePrompt}, ${input.styleName}`,
       count: 1,
       size: "768x1024"
     });
+
     return {
-      imageUrl: image[0]?.imageUrl || ""
+      imageUrl: generated[0]?.imageUrl || ""
     };
   }
 }
