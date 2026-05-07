@@ -111,7 +111,9 @@ model ShopifySession {
   id          String   @id @default(cuid())
   shop        String   @unique
   accessToken String   @map("access_token")
+  scope       String?
   createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("shopify_sessions")
 }

@@ -8,6 +8,7 @@
     "dev": "node ./node_modules/tsx/dist/cli.mjs watch src/index.ts",
     "build": "node ./node_modules/prisma/build/index.js generate && node ./node_modules/typescript/lib/tsc.js -p tsconfig.json",
     "start": "node dist/index.js",
+    "db:push:safe": "node ./node_modules/prisma/build/index.js db push --accept-data-loss",
     "provider:health-check": "node ./scripts/provider-health-check.js",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate",
     "prisma:migrate": "node ./node_modules/prisma/build/index.js migrate dev",
