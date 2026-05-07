@@ -105,7 +105,9 @@ CREATE TABLE "shopify_sessions" (
     "id" TEXT NOT NULL,
     "shop" TEXT NOT NULL,
     "access_token" TEXT NOT NULL,
+    "scope" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "shopify_sessions_pkey" PRIMARY KEY ("id")
 );
