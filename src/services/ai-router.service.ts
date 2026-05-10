@@ -8,6 +8,7 @@ export interface ShopifyProductRequest {
 
 export interface AiRouteResult {
   taskType: TaskType;
+  intent?: "create_ai_card" | "create_shopify_product_link" | "general_chat";
   targetAgent: "image-generator" | "shopify" | "customer-service";
   targetSkill: "generate-image" | "create-shopify-product" | "answer-faq";
 }
@@ -19,15 +20,12 @@ const IMAGE_GENERATION_INTENTS = [
   "做卡牌",
   "卡牌设计",
   "生成头像",
-  "anime",
   "ai绘图",
   "midjourney",
   "人造人18号",
   "人造人十八号",
   "人造人十八",
   "封面图",
-  "custom card",
-  "trading card",
   "生成方案",
   "做个图",
   "做图",
@@ -40,20 +38,34 @@ const IMAGE_GENERATION_INTENTS = [
   "logo",
   "主图",
   "包装图",
-  "image",
-  "generate image",
-  "anime girl card",
   "黑金ssr",
-  "头像"
+  "头像",
+  "i want a new beautiful girl card",
+  "make me a beautiful girl card",
+  "create a girl trading card",
+  "generate anime girl card",
+  "make a card",
+  "new card",
+  "beautiful girl card",
+  "sexy girl card",
+  "goddess card",
+  "waifu card",
+  "anime card",
+  "custom trading card",
+  "make a lootcard",
+  "generate card image",
+  "give me a card picture",
+  "i want a card design",
+  "custom card",
+  "trading card",
+  "card design",
+  "card picture",
+  "girl trading card",
+  "generate image",
+  "image"
 ];
 
 const SHOPIFY_CREATE_INTENTS = [
-  "shopify link",
-  "product link",
-  "checkout link",
-  "payment link",
-  "create product",
-  "create item",
   "shopify链接",
   "shopify 链接",
   "产品链接",
@@ -63,7 +75,14 @@ const SHOPIFY_CREATE_INTENTS = [
   "支付链接",
   "付款链接",
   "创建商品",
-  "创建产品"
+  "创建产品",
+  "我要下单",
+  "shopify link",
+  "product link",
+  "checkout link",
+  "payment link",
+  "create product",
+  "create item"
 ];
 
 function includesAny(text: string, keywords: string[]): boolean {
@@ -95,9 +114,14 @@ function isShopifyCreateIntent(message: string): boolean {
 export class AiRouterService {
   detectRoute(message: string): AiRouteResult {
     if (isImageGenerationIntent(message)) {
-      console.log("[AI ROUTER] matched image_generation");
+      if (/[a-z]/i.test(message) && /(beautiful girl card|anime card|custom trading card|lootcard|card design|card picture|girl trading card|waifu|goddess)/i.test(message)) {
+        console.log("[AI ROUTER] matched ai_card_order_en");
+      } else {
+        console.log("[AI ROUTER] matched image_generation");
+      }
       return {
         taskType: "image_generation",
+        intent: "create_ai_card",
         targetAgent: "image-generator",
         targetSkill: "generate-image"
       };
@@ -106,6 +130,7 @@ export class AiRouterService {
     if (isShopifyCreateIntent(message)) {
       return {
         taskType: "shopify_product_create",
+        intent: "create_shopify_product_link",
         targetAgent: "shopify",
         targetSkill: "create-shopify-product"
       };
@@ -113,6 +138,7 @@ export class AiRouterService {
 
     return {
       taskType: "text_chat",
+      intent: "general_chat",
       targetAgent: "customer-service",
       targetSkill: "answer-faq"
     };

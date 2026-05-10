@@ -349,6 +349,9 @@ export class DiscordBot {
         }
 
         if (workflowResult) {
+          if (workflowResult.memoryPatch.flowMode === "AI_CARD_ORDER") {
+            console.log("[SESSION] set flowMode=AI_CARD_ORDER");
+          }
           await memoryService.updateUserMemory({
             discordUserId: inbound.discordUserId,
             username: inbound.username,

@@ -25,17 +25,46 @@ function hasAny(text: string, keywords: string[]): boolean {
 
 function isConfirmation(text: string): boolean {
   const normalized = text.trim().toLowerCase();
-  return (
+  const matched =
     normalized === "1" ||
-    hasAny(normalized, ["ok", "yes", "confirm", "确认", "下单", "buy", "checkout", "order"])
-  );
+    hasAny(normalized, [
+      "ok",
+      "yes",
+      "confirm",
+      "确认",
+      "下单",
+      "buy",
+      "checkout",
+      "order",
+      "go",
+      "place order",
+      "create product",
+      "generate shopify link",
+      "make shopify link"
+    ]);
+
+  if (matched && /^(ok|yes|confirm|go|buy|checkout|order|place order|create product|generate shopify link|make shopify link|1)$/i.test(normalized)) {
+    console.log("[ORDER_FLOW] english confirm matched");
+  }
+
+  return matched;
 }
 
 function isModification(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return (
     normalized === "2" ||
-    hasAny(normalized, ["modify", "edit", "修改", "改一下", "换颜色", "更暗黑", "加金边", "再高级一点"])
+    hasAny(normalized, [
+      "modify",
+      "edit",
+      "修改",
+      "改一下",
+      "换颜色",
+      "更暗黑",
+      "加金边",
+      "再高级一点",
+      "做成赛博朋克"
+    ])
   );
 }
 
@@ -64,7 +93,8 @@ function detectSelection(text: string, draft?: CurrentOrderDraft | null): "A" | 
     return normalized;
   }
 
-  return null;
+  const optionMatch = normalized.match(/^OPTION\s+([ABC])$/);
+  return optionMatch?.[1] as "A" | "B" | "C" | null;
 }
 
 export class MessageRouter {
@@ -77,45 +107,47 @@ export class MessageRouter {
     const { message, flowMode, draft, aiRoute } = params;
     const selected = detectSelection(message, draft);
 
-    if (flowMode === "AI_CARD_ORDER") {
-      if (selected) {
-        return {
-          flowMode,
-          action: "select_option",
-          selectedOption: selected,
-          handledByFlow: true
-        };
+    if (flowMode !== "IDLE") {
+      if (flowMode === "AI_CARD_ORDER") {
+        if (selected) {
+          return {
+            flowMode,
+            action: "select_option",
+            selectedOption: selected,
+            handledByFlow: true
+          };
+        }
+
+        if (isCheckoutLink(message)) {
+          return { flowMode, action: "checkout_link", handledByFlow: true };
+        }
+
+        if (isProductLink(message) || isConfirmation(message)) {
+          return { flowMode, action: "confirm", handledByFlow: true };
+        }
+
+        if (isModification(message)) {
+          return { flowMode, action: "modify", handledByFlow: true };
+        }
+
+        if (isRegenerate(message)) {
+          return { flowMode, action: "regenerate", handledByFlow: true };
+        }
+
+        return { flowMode, action: "stay_in_flow", handledByFlow: true };
       }
 
-      if (isCheckoutLink(message)) {
-        return { flowMode, action: "checkout_link", handledByFlow: true };
+      if (flowMode === "SHOPIFY_CHECKOUT") {
+        if (isCheckoutLink(message)) {
+          return { flowMode, action: "checkout_link", handledByFlow: true };
+        }
+
+        if (isProductLink(message) || isConfirmation(message)) {
+          return { flowMode, action: "confirm", handledByFlow: true };
+        }
+
+        return { flowMode, action: "pass_through", handledByFlow: false };
       }
-
-      if (isProductLink(message) || isConfirmation(message)) {
-        return { flowMode, action: "confirm", handledByFlow: true };
-      }
-
-      if (isModification(message)) {
-        return { flowMode, action: "modify", handledByFlow: true };
-      }
-
-      if (isRegenerate(message)) {
-        return { flowMode, action: "regenerate", handledByFlow: true };
-      }
-
-      return { flowMode, action: "pass_through", handledByFlow: false };
-    }
-
-    if (flowMode === "SHOPIFY_CHECKOUT") {
-      if (isCheckoutLink(message)) {
-        return { flowMode, action: "checkout_link", handledByFlow: true };
-      }
-
-      if (isProductLink(message) || isConfirmation(message)) {
-        return { flowMode, action: "confirm", handledByFlow: true };
-      }
-
-      return { flowMode, action: "pass_through", handledByFlow: false };
     }
 
     if (aiRoute.taskType === "image_generation") {

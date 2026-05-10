@@ -7,12 +7,20 @@ function hasAny(text: string, keywords: string[]): boolean {
 export class StateManagerService {
   wantsCheckoutLink(message: string): boolean {
     const text = message.toLowerCase();
-    return hasAny(text, ["付款链接", "结账链接", "直接付款", "checkout", "cart", "payment link"]);
+    return hasAny(text, [
+      "付款链接",
+      "结账链接",
+      "直接付款",
+      "checkout",
+      "cart",
+      "payment link",
+      "checkout link"
+    ]);
   }
 
   wantsProductLink(message: string): boolean {
     const text = message.toLowerCase();
-    return hasAny(text, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接"]);
+    return hasAny(text, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接", "product link"]);
   }
 
   isPurchaseConfirmation(message: string): boolean {
@@ -30,7 +38,12 @@ export class StateManagerService {
         "ok",
         "yes",
         "confirm",
-        "checkout"
+        "checkout",
+        "go",
+        "place order",
+        "create product",
+        "generate shopify link",
+        "make shopify link"
       ])
     );
   }
@@ -63,7 +76,10 @@ export class StateManagerService {
 
   wantsMoreOptions(message: string): boolean {
     const text = message.toLowerCase();
-    return text.trim() === "3" || hasAny(text, ["再生成几个方案", "多几个方案", "再来几个", "more options", "more versions", "retry", "again", "regenerate", "重新生成"]);
+    return (
+      text.trim() === "3" ||
+      hasAny(text, ["再生成几个方案", "多几个方案", "再来几个", "more options", "more versions", "retry", "again", "regenerate", "重新生成"])
+    );
   }
 
   detectDraftSelection(message: string, draft?: CurrentOrderDraft | null): "A" | "B" | "C" | null {

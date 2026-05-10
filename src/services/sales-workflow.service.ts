@@ -2,12 +2,11 @@ import {
   ConversationEntry,
   CurrentOrderDraft,
   HermesMemory,
-  ImageOption,
-  LanguagePreference,
   OrderDraftOption,
   ProjectContext,
   ProjectStage,
-  ShippingType
+  ShippingType,
+  LanguagePreference
 } from "../types";
 import { imageService } from "./image.service";
 import { memoryService } from "./memory.service";
@@ -41,6 +40,10 @@ interface WorkflowInput {
   recentConversation: ConversationEntry[];
 }
 
+function t(language: LanguagePreference, zh: string, en: string): string {
+  return language === "zh" ? zh : en;
+}
+
 function inferStyle(message: string, memory: HermesMemory): string {
   const text = `${memory.latestDesignStyle} ${message}`.toLowerCase();
 
@@ -68,19 +71,6 @@ function inferCraft(style: string): string {
     return "限量 / 签名 / 收藏级";
   }
   return "全息 / 收藏卡工艺";
-}
-
-function inferTitle(style: string): string {
-  if (/黑金|SSR/.test(style)) {
-    return "黑金SSR典藏卡";
-  }
-  if (/赛博朋克/.test(style)) {
-    return "赛博朋克战斗卡";
-  }
-  if (/签名/.test(style)) {
-    return "高级收藏签名卡";
-  }
-  return "高级动漫收藏卡";
 }
 
 function buildCommercialPrompt(baseRequest: string, style: string): string {
@@ -115,37 +105,115 @@ function createOptions(message: string, shippingType: ShippingType): OrderDraftO
   const optionBStyle = /赛博朋克|cyberpunk/i.test(message) ? "赛博朋克" : "赛博朋克";
   const optionCStyle = /签名|收藏|limited/i.test(message) ? "高级收藏签名卡" : "高级收藏签名卡";
 
-  const optionA = {
-    id: "A" as const,
-    title: "黑金SSR典藏卡",
-    style: optionAStyle,
-    description: "黑金 / SSR / 全息 / 动漫角色",
-    estimatedPrice: pricingService.inferPrice("ssr 黑金").price,
-    shippingType,
-    prompt: buildCommercialPrompt(message, optionAStyle)
-  };
+  return [
+    {
+      id: "A",
+      title: "黑金SSR典藏卡",
+      style: optionAStyle,
+      description: "黑金 / SSR / 全息 / 动漫角色",
+      estimatedPrice: pricingService.inferPrice("ssr 黑金").price,
+      shippingType,
+      prompt: buildCommercialPrompt(message, optionAStyle)
+    },
+    {
+      id: "B",
+      title: "赛博朋克战斗卡",
+      style: optionBStyle,
+      description: "赛博朋克 / 霓虹 / 战斗感",
+      estimatedPrice: 39.99,
+      shippingType,
+      prompt: buildCommercialPrompt(message, optionBStyle)
+    },
+    {
+      id: "C",
+      title: "高级收藏签名卡",
+      style: optionCStyle,
+      description: "限量 / 签名 / 收藏级",
+      estimatedPrice: pricingService.inferPrice("限量签名").price,
+      shippingType,
+      prompt: buildCommercialPrompt(message, optionCStyle)
+    }
+  ];
+}
 
-  const optionB = {
-    id: "B" as const,
-    title: "赛博朋克战斗卡",
-    style: optionBStyle,
-    description: "赛博朋克 / 霓虹 / 战斗感",
-    estimatedPrice: 39.99,
-    shippingType,
-    prompt: buildCommercialPrompt(message, optionBStyle)
-  };
+function buildDraftOptionsReply(language: LanguagePreference, options: OrderDraftOption[]): string {
+  if (language === "zh") {
+    return [
+      "✅ 已为你生成 3 个卡牌方案",
+      "",
+      `A. ${options[0].title}`,
+      `价格：$${options[0].estimatedPrice.toFixed(2)}`,
+      `风格：${options[0].description}`,
+      "",
+      `B. ${options[1].title}`,
+      `价格：$${options[1].estimatedPrice.toFixed(2)}`,
+      `风格：${options[1].description}`,
+      "",
+      `C. ${options[2].title}`,
+      `价格：$${options[2].estimatedPrice.toFixed(2)}`,
+      `风格：${options[2].description}`,
+      "",
+      "回复 A / B / C 选择方案。",
+      "也可以回复“修改A：更暗黑一点”。"
+    ].join("\n");
+  }
 
-  const optionC = {
-    id: "C" as const,
-    title: "高级收藏签名卡",
-    style: optionCStyle,
-    description: "限量 / 签名 / 收藏级",
-    estimatedPrice: pricingService.inferPrice("限量签名").price,
-    shippingType,
-    prompt: buildCommercialPrompt(message, optionCStyle)
-  };
+  return [
+    "✅ I generated 3 card concepts for you",
+    "",
+    `A. ${options[0].title}`,
+    `Price: $${options[0].estimatedPrice.toFixed(2)}`,
+    `Style: ${options[0].description}`,
+    "",
+    `B. ${options[1].title}`,
+    `Price: $${options[1].estimatedPrice.toFixed(2)}`,
+    `Style: ${options[1].description}`,
+    "",
+    `C. ${options[2].title}`,
+    `Price: $${options[2].estimatedPrice.toFixed(2)}`,
+    `Style: ${options[2].description}`,
+    "",
+    "Reply A / B / C to choose a concept.",
+    'You can also say "Modify A: make it darker."'
+  ].join("\n");
+}
 
-  return [optionA, optionB, optionC];
+function buildPreviewReply(language: LanguagePreference): string {
+  return language === "zh"
+    ? ["✅ 已生成首版设计图", "", "回复：", "1️⃣ 确认并生成下单链接", "2️⃣ 修改设计", "3️⃣ 再生成几个方案"].join("\n")
+    : ["✅ Preview generated", "", "Reply:", "1 Confirm and create product link", "2 Modify design", "3 Generate new options"].join("\n");
+}
+
+function buildOrderLinkReply(params: {
+  language: LanguagePreference;
+  orderNo: string;
+  title: string;
+  price: string;
+  url: string;
+  linkType: "product" | "checkout";
+}): string {
+  const { language, orderNo, title, price, url, linkType } = params;
+  if (language === "zh") {
+    return [
+      linkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
+      "",
+      `订单号：${orderNo}`,
+      `商品：${title}`,
+      `价格：$${price}`,
+      `${linkType === "checkout" ? "付款链接" : "产品链接"}：${url}`,
+      ...(linkType === "product" ? ["", "如需直接付款，请回复“付款链接”。"] : [])
+    ].join("\n");
+  }
+
+  return [
+    linkType === "checkout" ? "✅ Payment link generated" : "✅ Product link generated",
+    "",
+    `Order No: ${orderNo}`,
+    `Product: ${title}`,
+    `Price: $${price}`,
+    `${linkType === "checkout" ? "Payment Link" : "Product Link"}: ${url}`,
+    ...(linkType === "product" ? ["", 'Reply "payment link" if you want direct checkout.'] : [])
+  ].join("\n");
 }
 
 async function maybeCreateProject(input: WorkflowInput, prompt: string): Promise<ProjectContext> {
@@ -201,25 +269,11 @@ export class SalesWorkflowService {
       shopifyProductUrl: ""
     };
 
+    console.log("[SESSION] set flowMode=AI_CARD_ORDER");
+    console.log("[ORDER_FLOW] stage=draft_options");
+
     return {
-      reply: [
-        "✅ 已为你生成 3 个卡牌方案",
-        "",
-        `A. ${options[0].title}`,
-        `价格：$${options[0].estimatedPrice.toFixed(2)}`,
-        `风格：${options[0].description}`,
-        "",
-        `B. ${options[1].title}`,
-        `价格：$${options[1].estimatedPrice.toFixed(2)}`,
-        `风格：${options[1].description}`,
-        "",
-        `C. ${options[2].title}`,
-        `价格：$${options[2].estimatedPrice.toFixed(2)}`,
-        `风格：${options[2].description}`,
-        "",
-        "回复 A / B / C 选择方案。",
-        "也可以回复“修改A：更暗黑一点”。"
-      ].join("\n"),
+      reply: buildDraftOptionsReply(input.language, options),
       stage: "draft_design",
       memoryPatch: {
         flowMode: "AI_CARD_ORDER",
@@ -240,7 +294,7 @@ export class SalesWorkflowService {
 
     if (!draft || !selectedOption) {
       return {
-        reply: "我还没有可选方案，请先让我为你生成 A/B/C 方案。",
+        reply: t(input.language, "我还没有可选方案，请先让我为你生成 A/B/C 方案。", "I do not have card options yet. Let me generate A/B/C concepts first."),
         stage: input.memory.currentStage || "idle",
         memoryPatch: {}
       };
@@ -253,7 +307,7 @@ export class SalesWorkflowService {
     const generated = await imageService.generateImage(selectedOption.prompt, selectedOption.style);
     if (!generated.ok) {
       return {
-        reply: `图片生成失败：${generated.error || "未知错误"}`,
+        reply: t(input.language, `图片生成失败：${generated.error || "未知错误"}`, `Image generation failed: ${generated.error || "Unknown error"}`),
         stage: "draft_design",
         memoryPatch: {}
       };
@@ -271,14 +325,7 @@ export class SalesWorkflowService {
     }
 
     return {
-      reply: [
-        "✅ 已生成首版设计图",
-        "",
-        "回复：",
-        "1️⃣ 确认并生成下单链接",
-        "2️⃣ 修改设计",
-        "3️⃣ 再生成几个方案"
-      ].join("\n"),
+      reply: buildPreviewReply(input.language),
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
@@ -325,7 +372,7 @@ export class SalesWorkflowService {
     const generated = await imageService.generateImage(revisedPrompt, selected.style);
     if (!generated.ok) {
       return {
-        reply: `图片生成失败：${generated.error || "未知错误"}`,
+        reply: t(input.language, `图片生成失败：${generated.error || "未知错误"}`, `Image generation failed: ${generated.error || "Unknown error"}`),
         stage: "waiting_confirmation",
         memoryPatch: {}
       };
@@ -333,7 +380,7 @@ export class SalesWorkflowService {
 
     const updatedOption: OrderDraftOption = {
       ...selected,
-      description: `${selected.description} / 已按要求修改`
+      description: input.language === "zh" ? `${selected.description} / 已按要求修改` : `${selected.description} / Updated based on your feedback`
     };
 
     if (input.project?.projectId) {
@@ -356,14 +403,7 @@ export class SalesWorkflowService {
     }
 
     return {
-      reply: [
-        "✅ 已更新设计图",
-        "",
-        "回复：",
-        "1️⃣ 确认并生成下单链接",
-        "2️⃣ 继续修改设计",
-        "3️⃣ 再生成几个方案"
-      ].join("\n"),
+      reply: buildPreviewReply(input.language),
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
@@ -392,11 +432,10 @@ export class SalesWorkflowService {
   async regenerateOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const draft = input.memory.currentOrderDraft;
     const baseMessage = draft?.originalMessage || input.message;
-    const baseOptions = createOptions(`${baseMessage} ${input.message}`, draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory));
-    const refreshed = baseOptions.map((option, index) => ({
-      ...option,
-      title: index === 0 ? "黑金SSR典藏卡" : index === 1 ? "赛博朋克战斗卡" : "高级收藏签名卡"
-    }));
+    const refreshed = createOptions(
+      `${baseMessage} ${input.message}`,
+      draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory)
+    );
 
     if (input.project?.projectId) {
       await memoryService.replaceImageOptions(
@@ -417,25 +456,11 @@ export class SalesWorkflowService {
       });
     }
 
+    console.log("[SESSION] set flowMode=AI_CARD_ORDER");
+    console.log("[ORDER_FLOW] stage=draft_options");
+
     return {
-      reply: [
-        "✅ 已重新生成 3 个卡牌方案",
-        "",
-        `A. ${refreshed[0].title}`,
-        `价格：$${refreshed[0].estimatedPrice.toFixed(2)}`,
-        `风格：${refreshed[0].description}`,
-        "",
-        `B. ${refreshed[1].title}`,
-        `价格：$${refreshed[1].estimatedPrice.toFixed(2)}`,
-        `风格：${refreshed[1].description}`,
-        "",
-        `C. ${refreshed[2].title}`,
-        `价格：$${refreshed[2].estimatedPrice.toFixed(2)}`,
-        `风格：${refreshed[2].description}`,
-        "",
-        "回复 A / B / C 选择方案。",
-        "也可以继续告诉我你想修改的方向。"
-      ].join("\n"),
+      reply: buildDraftOptionsReply(input.language, refreshed),
       stage: "draft_design",
       memoryPatch: {
         flowMode: "AI_CARD_ORDER",
@@ -472,18 +497,16 @@ export class SalesWorkflowService {
         (draft.orderId ? (await orderService.getOrderById(draft.orderId))?.shopifyCheckoutUrl || "" : "") ||
         draft.shopifyProductUrl;
       const resolvedLink = requestedLinkType === "checkout" ? resolvedCheckoutUrl : draft.shopifyProductUrl;
-      const linkLabel = requestedLinkType === "checkout" ? "付款链接" : "产品链接";
 
       return {
-        reply: [
-          requestedLinkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
-          "",
-          `订单号：${draft.orderNo || "-"}`,
-          `商品：${draft.productTitle || input.memory.latestProductTitle || "Custom AI Trading Card"}`,
-          `价格：$${draft.price || input.memory.latestPrice || "29.99"}`,
-          `${linkLabel}：${resolvedLink}`,
-          ...(requestedLinkType === "product" ? ["", "如需直接付款，请回复“付款链接”。"] : [])
-        ].join("\n"),
+        reply: buildOrderLinkReply({
+          language: input.language,
+          orderNo: draft.orderNo || "-",
+          title: draft.productTitle || input.memory.latestProductTitle || "Custom AI Trading Card",
+          price: draft.price || input.memory.latestPrice || "29.99",
+          url: resolvedLink,
+          linkType: requestedLinkType
+        }),
         stage: "payment_stage",
         memoryPatch: {}
       };
@@ -491,12 +514,13 @@ export class SalesWorkflowService {
 
     if (!draft || !(draft.stage === "image_generated" || draft.stage === "waiting_confirmation") || !draft.selectedOption || !draft.imageUrl) {
       return {
-        reply: "我还没有你的确认设计，请先选择方案并生成设计图。",
+        reply: t(input.language, "我还没有你的确认设计，请先选择方案并生成卡牌图。", "I do not have your confirmed design yet. Please choose a concept and generate the card image first."),
         stage: input.memory.currentStage || "idle",
         memoryPatch: {}
       };
     }
 
+    console.log("[SHOPIFY] create product from draft");
     const created = await shopifyService.createShopifyProductFromDiscord({
       title: draft.selectedOption.title,
       price: Number(draft.price || draft.selectedOption.estimatedPrice),
@@ -504,8 +528,8 @@ export class SalesWorkflowService {
       imageUrl: draft.imageUrl,
       shippingType: draft.shippingType,
       tags: ["discord-order", "custom-card", "lootcard-ai", draft.selectedOption.style],
-      seoTitle: draft.selectedOption.title,
-      seoDescription: `${draft.selectedOption.title} by LootCard AI. ${draft.selectedOption.description}. 定制商品预计 30 天左右发货。`
+      seoTitle: `${draft.selectedOption.title} Trading Card`,
+      seoDescription: `${draft.selectedOption.title} by LootCard AI. ${draft.selectedOption.description}. Custom-made product with around 30 days production and delivery.`
     });
 
     const checkoutUrl = created.checkoutUrl || created.productUrl;
@@ -513,7 +537,7 @@ export class SalesWorkflowService {
 
     if (!created.ok || !checkoutUrl || !productUrl) {
       return {
-        reply: `Shopify 产品创建失败：${created.error || "未知错误"}`,
+        reply: t(input.language, `Shopify 产品创建失败：${created.error || "未知错误"}`, `Shopify product creation failed: ${created.error || "Unknown error"}`),
         stage: "waiting_confirmation",
         memoryPatch: {}
       };
@@ -523,16 +547,16 @@ export class SalesWorkflowService {
       const numericProductId = created.productId?.split("/").pop() || created.productId;
       const numericVariantId = created.variantId?.split("/").pop() || created.variantId;
       await orderService.markShopifyCreated(draft.orderId);
-        await orderService.attachShopifyProduct(draft.orderId, {
-          shopifyShop: created.shop,
-          shopifyProductId: numericProductId,
-          shopifyProductGid: created.productId,
-          shopifyVariantId: numericVariantId,
-          shopifyVariantGid: created.variantId,
-          shopifyProductUrl: productUrl,
-          shopifyCheckoutUrl: checkoutUrl,
-          productTitle: draft.selectedOption.title,
-          productDescription: draft.productDescription,
+      await orderService.attachShopifyProduct(draft.orderId, {
+        shopifyShop: created.shop,
+        shopifyProductId: numericProductId,
+        shopifyProductGid: created.productId,
+        shopifyVariantId: numericVariantId,
+        shopifyVariantGid: created.variantId,
+        shopifyProductUrl: productUrl,
+        shopifyCheckoutUrl: checkoutUrl,
+        productTitle: draft.selectedOption.title,
+        productDescription: draft.productDescription,
         price: Number(draft.price || draft.selectedOption.estimatedPrice),
         metadata: {
           source: "discord",
@@ -563,18 +587,16 @@ export class SalesWorkflowService {
     }
 
     const finalLink = requestedLinkType === "checkout" ? checkoutUrl : productUrl;
-    const linkLabel = requestedLinkType === "checkout" ? "付款链接" : "产品链接";
 
     return {
-      reply: [
-        requestedLinkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
-        "",
-        `订单号：${draft.orderNo || "-"}`,
-        `商品：${draft.selectedOption.title}`,
-        `价格：$${Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2)}`,
-        `${linkLabel}：${finalLink}`,
-        ...(requestedLinkType === "product" ? ["", "如需直接付款，请回复“付款链接”。"] : [])
-      ].join("\n"),
+      reply: buildOrderLinkReply({
+        language: input.language,
+        orderNo: draft.orderNo || "-",
+        title: draft.selectedOption.title,
+        price: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
+        url: finalLink,
+        linkType: requestedLinkType
+      }),
       stage: "payment_stage",
       memoryPatch: {
         flowMode: "IDLE",

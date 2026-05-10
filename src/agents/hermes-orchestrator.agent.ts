@@ -111,7 +111,7 @@ function detectSelection(message: string): string | null {
   if (["A", "B", "C"].includes(trimmed)) {
     return trimmed;
   }
-  return trimmed.match(/\b([ABC])\b/)?.[1] || null;
+  return trimmed.match(/^OPTION\s+([ABC])$/)?.[1] || null;
 }
 
 function detectRevision(message: string): boolean {
@@ -152,7 +152,17 @@ function detectGenerate(message: string): boolean {
       "custom card",
       "trading card",
       "generate image",
-      "anime girl card"
+      "anime girl card",
+      "beautiful girl card",
+      "girl card",
+      "waifu card",
+      "goddess card",
+      "make me a beautiful girl card",
+      "create a girl trading card",
+      "make a card",
+      "make a lootcard",
+      "i want a card design",
+      "give me a card picture"
     ]) ||
     /\u751f\u6210|\u5361\u724c|\u56fe\u7247|\u56fe\u50cf|\u4eba\u9020\u4eba18|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u4eba\u9020\u4eba\u5341\u516b|\u6d77\u8d3c\u738b|\u5973\u738b|\u8d5b\u535a\u670b\u514b|\u9ed1\u91d1|\u505a\u4e2a\u56fe|\u505a\u56fe|\u753b\u56fe|\u751f\u6210\u56fe|\u751f\u6210\u56fe\u7247|\u5361\u724c\u8bbe\u8ba1|\u751f\u6210\u5934\u50cf|\u5c01\u9762\u56fe|\u751f\u6210\u65b9\u6848/.test(message)
   );
@@ -169,7 +179,19 @@ function detectNewOrderStart(message: string): boolean {
       "girl card",
       "anime card",
       "custom card",
-      "trading card"
+      "trading card",
+      "i want a new beautiful girl card",
+      "make me a beautiful girl card",
+      "create a girl trading card",
+      "generate anime girl card",
+      "make a card",
+      "sexy girl card",
+      "goddess card",
+      "waifu card",
+      "make a lootcard",
+      "generate card image",
+      "give me a card picture",
+      "i want a card design"
     ]) ||
     /\u65b0\u7684\u5361|\u518d\u6765\u4e00\u5355|\u5e2e\u6211\u505a\u4e00\u5f20|\u6211\u8981\u5b9a\u5236\u5361\u724c|\u7f8e\u5973\u5361\u724c|\u52a8\u6f2b\u5361\u724c/.test(message)
   );
