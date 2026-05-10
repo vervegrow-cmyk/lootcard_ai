@@ -1,5 +1,6 @@
 import { AiRouteResult } from "../services/ai-router.service";
-import { CurrentOrderDraft, FlowMode } from "../types";
+import { CurrentOrderDraft, FlowMode, LanguagePreference } from "../types";
+import { sessionService } from "./session.service";
 
 export type FlowAction =
   | "confirm"
@@ -10,13 +11,17 @@ export type FlowAction =
   | "product_link"
   | "stay_in_flow"
   | "start_ai_card_order"
-  | "pass_through";
+  | "pass_through"
+  | "reset_flow"
+  | "switch_language"
+  | "reset_and_restart";
 
 export interface FlowRouteResult {
   flowMode: FlowMode;
   action: FlowAction;
   selectedOption?: "A" | "B" | "C";
   handledByFlow: boolean;
+  language?: LanguagePreference;
 }
 
 function hasAny(text: string, keywords: string[]): boolean {
@@ -54,17 +59,7 @@ function isModification(text: string): boolean {
   const normalized = text.trim().toLowerCase();
   return (
     normalized === "2" ||
-    hasAny(normalized, [
-      "modify",
-      "edit",
-      "修改",
-      "改一下",
-      "换颜色",
-      "更暗黑",
-      "加金边",
-      "再高级一点",
-      "做成赛博朋克"
-    ])
+    hasAny(normalized, ["modify", "edit", "修改", "改一下", "换颜色", "更暗黑", "加金边", "再高级一点", "做成赛博朋克"])
   );
 }
 
@@ -106,8 +101,23 @@ export class MessageRouter {
   }): FlowRouteResult {
     const { message, flowMode, draft, aiRoute } = params;
     const selected = detectSelection(message, draft);
+    const languageSwitch = sessionService.detectLanguageSwitch(message);
 
     if (flowMode !== "IDLE") {
+      if (languageSwitch) {
+        return { flowMode, action: "switch_language", handledByFlow: true, language: languageSwitch };
+      }
+
+      if (sessionService.isResetRequest(message)) {
+        console.log("[SESSION] reset by user");
+        return { flowMode, action: "reset_flow", handledByFlow: true };
+      }
+
+      if (sessionService.isNewRequestWhileLocked(message)) {
+        console.log("[SESSION] reset by user");
+        return { flowMode: "IDLE", action: "reset_and_restart", handledByFlow: true };
+      }
+
       if (flowMode === "AI_CARD_ORDER") {
         if (selected) {
           return {

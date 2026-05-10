@@ -66,6 +66,9 @@ export interface CurrentOrderDraft {
   price: string;
   shippingType: ShippingType;
   shopifyProductUrl: string;
+  shopifyCheckoutUrl?: string;
+  lastActiveAt?: string;
+  language?: LanguagePreference;
 }
 
 export interface ProjectMemory {

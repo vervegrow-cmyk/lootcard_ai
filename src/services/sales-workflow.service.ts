@@ -166,6 +166,14 @@ async function maybeCreateProject(input: WorkflowInput, prompt: string): Promise
   return input.project || (await memoryService.createProject(input.discordUserId, input.message, prompt));
 }
 
+function stampDraft(draft: CurrentOrderDraft, language: LanguagePreference): CurrentOrderDraft {
+  return {
+    ...draft,
+    language,
+    lastActiveAt: new Date().toISOString()
+  };
+}
+
 export class SalesWorkflowService {
   async createDraftOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const shippingType = stateManagerService.inferShippingType(input.message, input.memory);
@@ -201,7 +209,7 @@ export class SalesWorkflowService {
     });
     await orderService.saveDraftOptions(order.id, options);
 
-    const currentOrderDraft: CurrentOrderDraft = {
+    const currentOrderDraft: CurrentOrderDraft = stampDraft({
       orderId: order.id,
       orderNo: order.orderNo,
       discordUserId: input.discordUserId,
@@ -215,7 +223,7 @@ export class SalesWorkflowService {
       price: "",
       shippingType,
       shopifyProductUrl: ""
-    };
+    }, input.language);
 
     console.log("[SESSION] set flowMode=AI_CARD_ORDER");
     console.log("[ORDER_FLOW] stage=draft_options");
@@ -296,7 +304,7 @@ export class SalesWorkflowService {
         latestShippingType: selectedOption.shippingType,
         latestProductTitle: selectedOption.title,
         latestProductDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
-        currentOrderDraft: {
+        currentOrderDraft: stampDraft({
           ...draft,
           stage: "waiting_confirmation",
           selectedOption,
@@ -305,7 +313,7 @@ export class SalesWorkflowService {
           productDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
           price: selectedOption.estimatedPrice.toFixed(2),
           shippingType: selectedOption.shippingType
-        }
+        }, input.language)
       }
     };
   }
@@ -369,13 +377,13 @@ export class SalesWorkflowService {
         latestImageProvider: generated.imageProvider || "",
         latestImageModel: generated.imageModel || "",
         revisionHistory: [...input.memory.revisionHistory, input.message].slice(-10),
-        currentOrderDraft: {
+        currentOrderDraft: stampDraft({
           ...draft,
           stage: "waiting_confirmation",
           selectedOption: { ...updatedOption, prompt: revisedPrompt },
           imageUrl: generated.imageUrl || "",
           productDescription: buildDescription(updatedOption, draft.originalMessage, input.language)
-        }
+        }, input.language)
       }
     };
   }
@@ -418,7 +426,7 @@ export class SalesWorkflowService {
         flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
-        currentOrderDraft: {
+        currentOrderDraft: stampDraft({
           orderId: draft?.orderId,
           orderNo: draft?.orderNo,
           discordUserId: input.discordUserId,
@@ -432,7 +440,7 @@ export class SalesWorkflowService {
           price: "",
           shippingType: refreshed[0].shippingType,
           shopifyProductUrl: ""
-        }
+        }, input.language)
       }
     };
   }
@@ -560,12 +568,12 @@ export class SalesWorkflowService {
         latestProductTitle: draft.selectedOption.title,
         latestProductDescription: draft.productDescription,
         latestPrice: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
-        currentOrderDraft: {
+        currentOrderDraft: stampDraft({
           ...draft,
           stage: "shopify_created",
           shopifyProductUrl: productUrl,
           shopifyCheckoutUrl: checkoutUrl
-        },
+        }, input.language),
         shopifyProductUrl: productUrl
       }
     };

@@ -101,6 +101,8 @@ export interface CurrentOrderDraft {
   shippingType: ShippingType;
   shopifyProductUrl: string;
   shopifyCheckoutUrl?: string;
+  lastActiveAt?: string;
+  language?: LanguagePreference;
 }
 
 export interface ShopifyProductDraft {

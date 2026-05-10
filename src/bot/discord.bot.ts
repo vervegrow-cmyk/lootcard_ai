@@ -184,9 +184,8 @@ export class DiscordBot {
         content: message.content.trim()
       };
 
-      const language = detectLanguage(inbound.content);
       console.log("[DISCORD] incoming message", inbound.content);
-      console.log(`[LANGUAGE] detected=${language}`);
+      let language: "zh" | "en" = "en";
 
       if (isEchoModeEnabled()) {
         await message.reply(`Echo: ${inbound.content}`);
@@ -207,15 +206,38 @@ export class DiscordBot {
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
         const project = await memoryService.getLatestProject(inbound.discordUserId);
         const activeOrder = await orderService.getLatestActiveOrderByDiscordUser(inbound.discordUserId);
+        const languageSwitch = sessionService.detectLanguageSwitch(inbound.content);
+        language = languageSwitch || detectLanguage(inbound.content, snapshot.memory.language);
+        console.log(`[LANGUAGE] detected=${language}`);
+        if (languageSwitch) {
+          console.log(`[LANGUAGE] switched=${language}`);
+        }
         const persistedDraft =
           snapshot.memory.currentOrderDraft ||
           (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
-        const restoredDraft = shouldReuseDraftForMessage(inbound.content, persistedDraft)
-          ? persistedDraft
+        if (sessionService.isTimedOutDraft(persistedDraft)) {
+          console.log("[SESSION] stale AI_CARD_ORDER cleared");
+          await memoryService.updateUserMemory({
+            discordUserId: inbound.discordUserId,
+            username: inbound.username,
+            memoryPatch: {
+              flowMode: "IDLE",
+              stage: "idle",
+              currentStage: "idle",
+              currentOrderDraft: null
+            }
+          });
+        }
+        const timedOutDraft = sessionService.isTimedOutDraft(persistedDraft) ? null : persistedDraft;
+        const restoredDraft = shouldReuseDraftForMessage(inbound.content, timedOutDraft)
+          ? timedOutDraft
           : null;
         const aiRoute = aiRouterService.detectRoute(inbound.content);
         const taskType = aiRoute.taskType;
-        const flowMode = sessionService.resolveFlowMode(snapshot.memory, restoredDraft);
+        const flowMode = sessionService.resolveFlowMode(
+          { ...snapshot.memory, language },
+          restoredDraft
+        );
         const flowRoute = messageRouter.route({
           message: inbound.content,
           flowMode,
@@ -230,6 +252,7 @@ export class DiscordBot {
           message: inbound.content,
           memory: {
             ...snapshot.memory,
+            language,
             currentOrderDraft: restoredDraft,
             currentProject: project?.projectId || "",
             imageOptions:
@@ -263,6 +286,7 @@ export class DiscordBot {
           language,
           memory: {
             ...snapshot.memory,
+            language,
             currentOrderDraft: restoredDraft
           },
           project,
@@ -300,11 +324,59 @@ export class DiscordBot {
                 ? await salesWorkflowService.regenerateOptions(workflowInput)
                 : await salesWorkflowService.createDraftOptions(workflowInput);
               break;
+            case "reset_flow":
+              workflowResult = {
+                reply:
+                  language === "zh"
+                    ? "已取消当前卡牌定制流程。你可以直接告诉我新的卡牌需求。"
+                    : "The current card customization flow has been cancelled. You can send a new card request anytime.",
+                stage: "idle",
+                memoryPatch: {
+                  language,
+                  flowMode: "IDLE" as const,
+                  stage: "idle" as const,
+                  currentStage: "idle" as const,
+                  currentOrderDraft: null
+                }
+              };
+              break;
+            case "switch_language":
+              workflowResult = {
+                reply:
+                  flowRoute.language === "en"
+                    ? "Sure — I’ll reply in English from now on."
+                    : "可以，我之后会用中文回复你。",
+                stage: snapshot.memory.currentStage || "idle",
+                memoryPatch: {
+                  language: flowRoute.language || language
+                }
+              };
+              break;
+            case "reset_and_restart": {
+              const restartLanguage = flowRoute.language || language;
+              workflowResult = await salesWorkflowService.createDraftOptions({
+                ...workflowInput,
+                language: restartLanguage,
+                memory: {
+                  ...workflowInput.memory,
+                  language: restartLanguage,
+                  flowMode: "IDLE",
+                  currentOrderDraft: null,
+                  stage: "idle",
+                  currentStage: "idle"
+                }
+              });
+              break;
+            }
             case "stay_in_flow":
               finalReply =
                 flowMode === "SHOPIFY_CHECKOUT"
-                  ? "当前正在下单流程中。你可以回复“产品链接”查看商品页，或回复“付款链接”直接进入付款。"
-                  : "当前正在 AI 卡牌定制流程中。请回复 A/B/C 选择方案，或回复 1 确认下单、2 修改设计、3 重新生成。";
+                  ? language === "zh"
+                    ? "当前正在下单流程中。你可以回复“产品链接”查看商品页，或回复“付款链接”直接进入付款。"
+                    : 'You are currently in checkout. Reply "product link" to view the product page, or reply "payment link" for direct checkout.'
+                  : language === "zh"
+                    ? "当前正在 AI 卡牌定制流程中。请回复 A/B/C 选择方案，或回复 1确认下单、2修改设计、3重新生成，或回复“取消”重新开始。"
+                    : "You’re currently in a card customization flow. Reply A/B/C, 1 to confirm, 2 to modify, 3 to regenerate, or type cancel to start over.";
               workflowResult = null;
               break;
             default:
