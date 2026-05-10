@@ -577,7 +577,7 @@ export class SalesWorkflowService {
       ].join("\n"),
       stage: "payment_stage",
       memoryPatch: {
-        flowMode: "SHOPIFY_CHECKOUT",
+        flowMode: "IDLE",
         stage: "payment_stage",
         currentStage: "payment_stage",
         latestShopifyProductId: created.productId || "",

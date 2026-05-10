@@ -10,11 +10,16 @@ export class SessionService {
       return "IDLE";
     }
 
-    if (draft.stage === "shopify_created" || memory.currentStage === "payment_stage") {
-      return "SHOPIFY_CHECKOUT";
+    if (
+      draft.stage === "draft_options" ||
+      draft.stage === "option_selected" ||
+      draft.stage === "image_generated" ||
+      draft.stage === "waiting_confirmation"
+    ) {
+      return "AI_CARD_ORDER";
     }
 
-    return "AI_CARD_ORDER";
+    return "IDLE";
   }
 
   lockAiCardOrder(): FlowMode {

@@ -77,7 +77,7 @@ export class MessageRouter {
     const { message, flowMode, draft, aiRoute } = params;
     const selected = detectSelection(message, draft);
 
-    if (flowMode === "AI_CARD_ORDER" || flowMode === "SHOPIFY_CHECKOUT") {
+    if (flowMode === "AI_CARD_ORDER") {
       if (selected) {
         return {
           flowMode,
@@ -103,7 +103,19 @@ export class MessageRouter {
         return { flowMode, action: "regenerate", handledByFlow: true };
       }
 
-      return { flowMode, action: "stay_in_flow", handledByFlow: true };
+      return { flowMode, action: "pass_through", handledByFlow: false };
+    }
+
+    if (flowMode === "SHOPIFY_CHECKOUT") {
+      if (isCheckoutLink(message)) {
+        return { flowMode, action: "checkout_link", handledByFlow: true };
+      }
+
+      if (isProductLink(message) || isConfirmation(message)) {
+        return { flowMode, action: "confirm", handledByFlow: true };
+      }
+
+      return { flowMode, action: "pass_through", handledByFlow: false };
     }
 
     if (aiRoute.taskType === "image_generation") {

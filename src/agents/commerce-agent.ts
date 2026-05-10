@@ -74,7 +74,7 @@ export class CommerceAgent {
       language,
       reply: t(language, "好的，我现在为你生成 Shopify 下单链接。", "Great, I am creating your Shopify checkout link now."),
       memory_update: {
-        flowMode: "SHOPIFY_CHECKOUT",
+        flowMode: "IDLE",
         stage: "payment",
         selectedOption: selectedOption.id,
         selectedOptionTitle: selectedOption.title,
