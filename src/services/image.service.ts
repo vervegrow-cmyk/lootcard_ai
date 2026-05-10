@@ -5,7 +5,7 @@ function env(name: string): string {
 }
 
 function imageConfigError(): Error {
-  return new Error("图片模型未配置，请配置 IMAGE_PROVIDER 和对应 API KEY。");
+  return new Error("图片生成模型还没配置，请先配置 IMAGE_PROVIDER 和对应 API KEY。");
 }
 
 export class ImageService {
@@ -13,7 +13,13 @@ export class ImageService {
     return env("IMAGE_PROVIDER").toLowerCase();
   }
 
-  private ensureConfigured(): { provider: string; model: string; apiKey: string } {
+  private ensureConfigured(): {
+    provider: string;
+    model: string;
+    apiKey?: string;
+    accessKey?: string;
+    secretKey?: string;
+  } {
     const provider = this.getProvider();
     console.log(`[IMAGE] provider=${provider || "unconfigured"}`);
 
@@ -23,14 +29,40 @@ export class ImageService {
 
     if (provider === "kling") {
       const apiKey = env("KLING_API_KEY");
+      const accessKey = env("KLING_ACCESS_KEY");
+      const secretKey = env("KLING_SECRET_KEY");
       const model = env("KLING_IMAGE_MODEL") || "kling-v1";
-      if (!apiKey) {
+
+      if (!apiKey && !(accessKey && secretKey)) {
         throw imageConfigError();
       }
-      return { provider, model, apiKey };
+
+      return {
+        provider,
+        model,
+        apiKey,
+        accessKey,
+        secretKey
+      };
     }
 
     throw new Error(`Unsupported IMAGE_PROVIDER: ${provider}`);
+  }
+
+  async generateImage(prompt: string): Promise<{ imageUrl: string; prompt: string; summary: string }> {
+    const config = this.ensureConfigured();
+    console.log("[IMAGE] generating", { provider: config.provider, model: config.model });
+
+    try {
+      if (config.provider === "kling") {
+        throw new Error(`Kling provider is configured with model ${config.model}, but live image generation is not implemented yet.`);
+      }
+
+      throw new Error(`Unsupported IMAGE_PROVIDER: ${config.provider}`);
+    } catch (error) {
+      console.log("[IMAGE] failed", error instanceof Error ? error.message : String(error));
+      throw error;
+    }
   }
 
   async generateImages(
@@ -52,13 +84,21 @@ export class ImageService {
           }
         : input;
 
-    const config = this.ensureConfigured();
+    const count = normalized.count ?? 3;
+    const items: ImageOption[] = [];
 
-    if (config.provider === "kling") {
-      throw new Error(`Kling provider is configured with model ${config.model}, but live image generation is not implemented yet.`);
+    for (let index = 0; index < count; index += 1) {
+      const generated = await this.generateImage(normalized.prompt);
+      items.push({
+        id: String.fromCharCode(65 + index),
+        title: `Generated Image ${index + 1}`,
+        imageUrl: generated.imageUrl,
+        prompt: generated.prompt
+      });
     }
 
-    throw new Error(`Unsupported IMAGE_PROVIDER: ${config.provider}`);
+    console.log("[IMAGE] success", { count: items.length });
+    return items;
   }
 
   async reviseImage(input: {
@@ -67,6 +107,7 @@ export class ImageService {
     revisionText: string;
   }): Promise<{ imageUrl: string; prompt: string; summary: string }> {
     const config = this.ensureConfigured();
+    console.log("[IMAGE] generating", { provider: config.provider, model: config.model, revision: true });
     throw new Error(`Image revision is not implemented for provider ${config.provider}.`);
   }
 
@@ -75,14 +116,9 @@ export class ImageService {
     styleName: string;
     projectId: string;
   }): Promise<{ imageUrl: string }> {
-    const generated = await this.generateImages({
-      prompt: `${input.imagePrompt}, ${input.styleName}`,
-      count: 1,
-      size: "768x1024"
-    });
-
+    const generated = await this.generateImage(`${input.imagePrompt}, ${input.styleName}`);
     return {
-      imageUrl: generated[0]?.imageUrl || ""
+      imageUrl: generated.imageUrl
     };
   }
 }

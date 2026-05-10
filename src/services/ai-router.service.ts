@@ -31,15 +31,15 @@ export class AiRouterService {
         "main image",
         "packaging image"
       ]) ||
-      /生成图片|出图|画一个|设计图|预览图|卡牌图|海报|logo|主图|包装图/.test(message)
+      /生成图片|做个图|做图|生成图|出图|画图|设计图|帮我做个图|卡牌图|海报|logo|主图|包装图/.test(message)
     ) {
+      console.log("[AI ROUTER] matched image_generation");
       return "image_generation";
     }
 
     if (
       includesAny(lower, [
         "shopify link",
-        "shopify链接",
         "product link",
         "checkout link",
         "payment link",

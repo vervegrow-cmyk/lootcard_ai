@@ -47,12 +47,8 @@ function formatCurrency(value?: number): string {
   return Number.isFinite(amount) ? amount.toFixed(2) : "29.99";
 }
 
-function formatImageReply(items: Array<{ id: string; title: string; imageUrl: string; prompt: string }>): string {
-  return items
-    .map((item) =>
-      [`【${item.id}】${item.title}`, `图片：${item.imageUrl}`, `提示词：${item.prompt}`].join("\n")
-    )
-    .join("\n\n");
+function formatImageReply(item: { imageUrl: string; prompt: string; summary: string }): string {
+  return [`图片：${item.imageUrl}`, `提示词：${item.prompt}`, `说明：${item.summary}`].join("\n");
 }
 
 function formatShopifyReply(params: {
@@ -141,7 +137,10 @@ export class DiscordBot {
         const taskType = aiRouterService.detectTaskType(inbound.content);
         console.log(`[AI ROUTER] taskType=${taskType}`);
 
-        if (taskType === "shopify_product_create") {
+        if (taskType === "image_generation") {
+          const image = await imageService.generateImage(inbound.content);
+          finalReply = formatImageReply(image);
+        } else if (taskType === "shopify_product_create") {
           const request = aiRouterService.extractShopifyProductRequest(inbound.content);
           const created = await shopifyService.createShopifyProductFromDiscord({
             title: request.title,
@@ -158,14 +157,6 @@ export class DiscordBot {
             productId: created.productId,
             error: created.error
           });
-        } else if (taskType === "image_generation") {
-          const images = await imageService.generateImages({
-            prompt: inbound.content,
-            count: 3,
-            size: "1024x1024"
-          });
-
-          finalReply = formatImageReply(images);
         } else {
           finalReply = await openRouterService.chat({
             message: inbound.content,
