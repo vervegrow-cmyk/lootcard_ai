@@ -2,9 +2,11 @@ import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.
 import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
 import { aiRouterService } from "../services/ai-router.service";
 import { memoryService } from "../services/memory.service";
+import { orderService } from "../services/order.service";
 import { salesWorkflowService } from "../services/sales-workflow.service";
 import { stateManagerService } from "../services/state-manager.service";
 import { logger } from "../utils/logger";
+import { OrderStatus } from "@prisma/client";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -44,6 +46,50 @@ function detectLanguage(message: string, fallback: "zh" | "en" = "en"): "zh" | "
 
 function isEchoModeEnabled(): boolean {
   return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
+}
+
+function isOrderQuery(message: string): boolean {
+  const lower = message.toLowerCase();
+  return /我的订单|订单查询|查看订单/.test(message) || lower.includes("order status");
+}
+
+function orderStatusLabel(status: OrderStatus): string {
+  const labels: Record<OrderStatus, string> = {
+    DRAFT: "草稿",
+    DESIGNING: "设计中",
+    OPTION_SELECTED: "已选择方案",
+    IMAGE_GENERATED: "已生成图片",
+    WAITING_CONFIRMATION: "等待确认",
+    SHOPIFY_CREATED: "商品已创建",
+    WAITING_PAYMENT: "等待付款",
+    PAID: "已付款",
+    PRODUCTION: "生产中",
+    SHIPPED: "已发货",
+    COMPLETED: "已完成",
+    CANCELLED: "已取消",
+    FAILED: "失败"
+  };
+  return labels[status] || status;
+}
+
+async function formatRecentOrders(discordUserId: string): Promise<string> {
+  const orders = await orderService.listUserOrders(discordUserId, 5);
+  if (!orders.length) {
+    return "📦 我的订单\n\n暂时还没有订单记录。";
+  }
+
+  return [
+    "📦 我的订单",
+    "",
+    ...orders.flatMap((order, index) => [
+      `${index + 1}. ${order.orderNo}`,
+      `状态：${orderStatusLabel(order.status)}`,
+      `商品：${order.productTitle || "未生成商品"}`,
+      ...(order.price ? [`价格：$${order.price.toString()}`] : []),
+      ...(order.shopifyProductUrl || order.shopifyCheckoutUrl ? [`链接：${order.shopifyProductUrl || order.shopifyCheckoutUrl}`] : []),
+      ""
+    ])
+  ].join("\n").trim();
 }
 
 async function buildAttachmentsFromUrls(urls: string[]): Promise<AttachmentBuilder[]> {
@@ -129,6 +175,10 @@ export class DiscordBot {
         const snapshot = await memoryService.getOrCreateUserMemory(inbound.discordUserId, inbound.username);
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
         const project = await memoryService.getLatestProject(inbound.discordUserId);
+        const activeOrder = await orderService.getLatestActiveOrderByDiscordUser(inbound.discordUserId);
+        const restoredDraft =
+          snapshot.memory.currentOrderDraft ||
+          (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
         const taskType = aiRouterService.detectTaskType(inbound.content);
 
         console.log("[AGENT] route start");
@@ -138,9 +188,10 @@ export class DiscordBot {
           message: inbound.content,
           memory: {
             ...snapshot.memory,
+            currentOrderDraft: restoredDraft,
             currentProject: project?.projectId || "",
             imageOptions:
-              snapshot.memory.currentOrderDraft?.options.map((option) => ({
+              restoredDraft?.options.map((option) => ({
                 id: option.id,
                 title: option.title,
                 imageUrl: "",
@@ -164,18 +215,24 @@ export class DiscordBot {
           username: inbound.username,
           message: inbound.content,
           language,
-          memory: snapshot.memory,
+          memory: {
+            ...snapshot.memory,
+            currentOrderDraft: restoredDraft
+          },
           project,
           recentConversation
         } as const;
 
         let workflowResult;
-        const draft = snapshot.memory.currentOrderDraft;
+        const draft = restoredDraft;
         console.log(`[ORDER_FLOW] stage=${draft?.stage || snapshot.memory.currentStage || "idle"}`);
 
         const selectedDraftOption = stateManagerService.detectDraftSelection(inbound.content, draft);
 
-        if (stateManagerService.isPurchaseConfirmation(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
+        if (isOrderQuery(inbound.content)) {
+          finalReply = await formatRecentOrders(inbound.discordUserId);
+          workflowResult = null;
+        } else if (stateManagerService.isPurchaseConfirmation(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
           workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
         } else if (selectedDraftOption) {
           workflowResult = await salesWorkflowService.generateImageForSelectedOption(workflowInput, selectedDraftOption);
@@ -191,20 +248,22 @@ export class DiscordBot {
           workflowResult = await salesWorkflowService.answerGeneralQuestion(workflowInput);
         }
 
-        await memoryService.updateUserMemory({
-          discordUserId: inbound.discordUserId,
-          username: inbound.username,
-          memoryPatch: workflowResult.memoryPatch
-        });
+        if (workflowResult) {
+          await memoryService.updateUserMemory({
+            discordUserId: inbound.discordUserId,
+            username: inbound.username,
+            memoryPatch: workflowResult.memoryPatch
+          });
 
-        if (project?.projectId && workflowResult.projectPatch) {
-          await memoryService.updateProject(project.projectId, workflowResult.projectPatch);
-        }
+          if (project?.projectId && workflowResult.projectPatch) {
+            await memoryService.updateProject(project.projectId, workflowResult.projectPatch);
+          }
 
-        finalReply = workflowResult.reply;
+          finalReply = workflowResult.reply;
 
-        if (workflowResult.imageUrls?.length) {
-          attachments = await buildAttachmentsFromUrls(workflowResult.imageUrls);
+          if (workflowResult.imageUrls?.length) {
+            attachments = await buildAttachmentsFromUrls(workflowResult.imageUrls);
+          }
         }
       } catch (error) {
         logger.error("Failed to process Discord message", error);

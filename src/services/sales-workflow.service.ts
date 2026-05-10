@@ -12,6 +12,7 @@ import {
 import { imageService } from "./image.service";
 import { memoryService } from "./memory.service";
 import { openRouterService } from "./openrouter.service";
+import { orderService } from "./order.service";
 import { pricingService } from "./pricing.service";
 import { stateManagerService } from "./state-manager.service";
 import { shopifyService } from "./shopify.service";
@@ -156,6 +157,15 @@ export class SalesWorkflowService {
     const shippingType = stateManagerService.inferShippingType(input.message, input.memory);
     const options = createOptions(input.message, shippingType);
     const project = await maybeCreateProject(input, options[0].prompt);
+    const order =
+      (input.memory.currentOrderDraft?.orderId && (await orderService.getOrderById(input.memory.currentOrderDraft.orderId))) ||
+      (await orderService.getLatestActiveOrderByDiscordUser(input.discordUserId)) ||
+      (await orderService.createDraftOrder({
+        discordUserId: input.discordUserId,
+        originalPrompt: input.message,
+        cardProjectId: project.projectId,
+        metadata: { source: "discord", type: "card_design" }
+      }));
 
     await memoryService.replaceImageOptions(
       project.projectId,
@@ -173,8 +183,11 @@ export class SalesWorkflowService {
       currentPrompt: options[0].prompt,
       finalDesignSummary: options[0].style
     });
+    await orderService.saveDraftOptions(order.id, options);
 
     const currentOrderDraft: CurrentOrderDraft = {
+      orderId: order.id,
+      orderNo: order.orderNo,
       discordUserId: input.discordUserId,
       stage: "draft_options",
       originalMessage: input.message,
@@ -232,6 +245,10 @@ export class SalesWorkflowService {
       };
     }
 
+    if (draft.orderId) {
+      await orderService.saveSelectedOption(draft.orderId, selectedOption, draft.originalMessage);
+    }
+
     const generated = await imageService.generateImage(selectedOption.prompt, selectedOption.style);
     if (!generated.ok) {
       return {
@@ -247,6 +264,9 @@ export class SalesWorkflowService {
         currentPrompt: selectedOption.prompt,
         finalDesignSummary: selectedOption.style
       });
+    }
+    if (draft.orderId) {
+      await orderService.attachGeneratedImage(draft.orderId, generated.imageUrl || "", selectedOption.prompt);
     }
 
     return {
@@ -327,6 +347,10 @@ export class SalesWorkflowService {
         currentPrompt: revisedPrompt,
         finalDesignSummary: updatedOption.style
       });
+    }
+    if (draft.orderId) {
+      await orderService.saveSelectedOption(draft.orderId, { ...updatedOption, prompt: revisedPrompt }, draft.originalMessage);
+      await orderService.attachGeneratedImage(draft.orderId, generated.imageUrl || "", revisedPrompt);
     }
 
     return {
@@ -414,6 +438,8 @@ export class SalesWorkflowService {
         stage: "draft_design",
         currentStage: "draft_design",
         currentOrderDraft: {
+          orderId: draft?.orderId,
+          orderNo: draft?.orderNo,
           discordUserId: input.discordUserId,
           stage: "draft_options",
           originalMessage: baseMessage,
@@ -438,6 +464,7 @@ export class SalesWorkflowService {
         reply: [
           "✅ 下单链接已生成",
           "",
+          `订单号：${draft.orderNo || "-"}`,
           `商品：${draft.productTitle || input.memory.latestProductTitle || "Custom AI Trading Card"}`,
           `价格：$${draft.price || input.memory.latestPrice || "29.99"}`,
           `下单链接：${draft.shopifyProductUrl}`,
@@ -476,6 +503,28 @@ export class SalesWorkflowService {
       };
     }
 
+    if (draft.orderId) {
+      const numericProductId = created.productId?.split("/").pop() || created.productId;
+      const numericVariantId = created.variantId?.split("/").pop() || created.variantId;
+      await orderService.markShopifyCreated(draft.orderId);
+      await orderService.attachShopifyProduct(draft.orderId, {
+        shopifyShop: created.shop,
+        shopifyProductId: numericProductId,
+        shopifyProductGid: created.productId,
+        shopifyVariantId: numericVariantId,
+        shopifyVariantGid: created.variantId,
+        shopifyProductUrl: created.productUrl,
+        shopifyCheckoutUrl: created.productUrl,
+        productTitle: draft.selectedOption.title,
+        productDescription: draft.productDescription,
+        price: Number(draft.price || draft.selectedOption.estimatedPrice),
+        metadata: {
+          source: "discord",
+          orderNo: draft.orderNo
+        }
+      });
+    }
+
     if (input.project?.projectId) {
       await memoryService.updateProject(input.project.projectId, {
         status: "payment_stage",
@@ -501,6 +550,7 @@ export class SalesWorkflowService {
       reply: [
         "✅ 下单链接已生成",
         "",
+        `订单号：${draft.orderNo || "-"}`,
         `商品：${draft.selectedOption.title}`,
         `价格：$${Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2)}`,
         `下单链接：${created.productUrl}`,

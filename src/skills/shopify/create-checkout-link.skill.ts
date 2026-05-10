@@ -1,5 +1,5 @@
-import { orderService } from "../../services/order.service";
 import { isShopifyConfigured } from "../../services/shopify.service";
+import { shopifyService } from "../../services/shopify.service";
 import { SkillExecutionContext, SkillExecutionResult } from "../../types/skill.types";
 
 function hasShopifyConfig(): boolean {
@@ -46,21 +46,34 @@ export class CreateCheckoutLinkSkill {
       };
     }
 
-    const created = await orderService.createShopifyOrderLink({
-      project: context.project as never,
-      discordUserId: context.discordUserId,
-      product
+    const created = await shopifyService.createShopifyProduct({
+      title: product.title,
+      description: product.description,
+      price: Number(product.price),
+      tags: product.tags
     });
+
+    if (!created.ok || !created.productUrl) {
+      return {
+        reply:
+          context.language === "zh"
+            ? `Shopify 产品创建失败：${created.error || "未知错误"}`
+            : `Shopify product creation failed: ${created.error || "Unknown error"}`,
+        stage: "confirmed",
+        actions: ["create-checkout-link-failed"],
+        product
+      };
+    }
 
     return {
       reply: "",
       stage: "payment",
       actions: ["create-checkout-link"],
       data: {
-        checkoutLink: created.url
+        checkoutLink: created.productUrl
       },
       memoryUpdate: {
-        shopifyProductUrl: created.url
+        shopifyProductUrl: created.productUrl
       },
       product
     };

@@ -1,5 +1,6 @@
 import crypto from "crypto";
-import { ShopifySession, ShopifyShop } from "@prisma/client";
+import { OrderStatus, ShopifySession, ShopifyShop } from "@prisma/client";
+import { orderService } from "./order.service";
 import { prisma } from "./prisma.service";
 
 export interface ShopifyHealthStatus {
@@ -384,7 +385,7 @@ export class ShopifyAuthService {
 
   async registerWebhooks(shop: string, accessToken: string): Promise<void> {
     const callbackUrl = `${shopifyAppUrl()}/webhooks/shopify`;
-    const topics = ["APP_UNINSTALLED", "PRODUCTS_CREATE", "PRODUCTS_UPDATE", "ORDERS_CREATE"];
+    const topics = ["APP_UNINSTALLED", "PRODUCTS_CREATE", "PRODUCTS_UPDATE", "ORDERS_CREATE", "ORDERS_PAID", "FULFILLMENTS_CREATE"];
 
     for (const topic of topics) {
       await registerWebhookTopic(shop, accessToken, topic, callbackUrl);
@@ -425,6 +426,7 @@ export class ShopifyAuthService {
   }
 
   async handleWebhook(payload: ShopifyWebhookPayload): Promise<void> {
+    console.log("[SHOPIFY WEBHOOK] topic=", payload.topic);
     if (payload.topic === "APP_UNINSTALLED") {
       await prisma.shopifyShop.updateMany({
         where: { shop: payload.shop },
@@ -433,6 +435,62 @@ export class ShopifyAuthService {
           webhookStatus: "uninstalled"
         }
       });
+      return;
+    }
+
+    const body = payload.payload as {
+      id?: number | string;
+      admin_graphql_api_id?: string;
+      name?: string;
+      line_items?: Array<{
+        product_id?: number | string;
+        variant_id?: number | string;
+      }>;
+      order_id?: number | string;
+    };
+
+    if (payload.topic === "ORDERS_CREATE" || payload.topic === "ORDERS_PAID") {
+      const lineItems = body.line_items || [];
+      for (const lineItem of lineItems) {
+        const matched = await orderService.findByShopifyProduct(
+          lineItem.product_id ? String(lineItem.product_id) : null,
+          lineItem.variant_id ? String(lineItem.variant_id) : null
+        );
+        if (!matched) {
+          continue;
+        }
+        console.log("[SHOPIFY WEBHOOK] order matched orderNo=", matched.orderNo);
+        await orderService.attachShopifyPayment(matched.id, {
+          shopifyOrderId: body.id ? String(body.id) : undefined,
+          shopifyOrderGid: body.admin_graphql_api_id,
+          shopifyOrderName: body.name,
+          metadata: {
+            topic: payload.topic,
+            shop: payload.shop
+          }
+        });
+        console.log("[SHOPIFY WEBHOOK] status updated=", "PAID");
+        return;
+      }
+    }
+
+    if (payload.topic === "FULFILLMENTS_CREATE") {
+      const lineItems = body.line_items || [];
+      for (const lineItem of lineItems) {
+        const matched = await orderService.findByShopifyProduct(
+          lineItem.product_id ? String(lineItem.product_id) : null,
+          lineItem.variant_id ? String(lineItem.variant_id) : null
+        );
+        if (!matched) {
+          continue;
+        }
+        console.log("[SHOPIFY WEBHOOK] order matched orderNo=", matched.orderNo);
+        await orderService.updateOrderStatus(matched.id, OrderStatus.SHIPPED, {
+          shippedAt: new Date()
+        });
+        console.log("[SHOPIFY WEBHOOK] status updated=", "SHIPPED");
+        return;
+      }
     }
   }
 

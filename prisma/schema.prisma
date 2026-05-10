@@ -7,6 +7,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum OrderStatus {
+  DRAFT
+  DESIGNING
+  OPTION_SELECTED
+  IMAGE_GENERATED
+  WAITING_CONFIRMATION
+  SHOPIFY_CREATED
+  WAITING_PAYMENT
+  PAID
+  PRODUCTION
+  SHIPPED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
 model UserMemory {
   id            String   @id @default(cuid())
   discordUserId String   @unique
@@ -116,4 +132,48 @@ model ShopifySession {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("shopify_sessions")
+}
+
+model Order {
+  id                  String      @id @default(cuid())
+  orderNo             String      @unique
+  discordUserId       String
+  discordChannelId    String?
+  discordMessageId    String?
+  cardProjectId       String?
+  originalPrompt      String?
+  selectedOption      String?
+  selectedStyle       String?
+  designPrompt        String?
+  imageUrl            String?
+  productTitle        String?
+  productDescription  String?
+  price               Decimal?    @db.Decimal(10, 2)
+  currency            String      @default("USD")
+  shippingType        String?
+  shippingAddressJson Json?
+  shopifyShop         String?
+  shopifyProductId    String?
+  shopifyProductGid   String?
+  shopifyVariantId    String?
+  shopifyVariantGid   String?
+  shopifyProductUrl   String?
+  shopifyCheckoutUrl  String?
+  shopifyOrderId      String?
+  shopifyOrderGid     String?
+  shopifyOrderName    String?
+  status              OrderStatus @default(DRAFT)
+  paidAt              DateTime?
+  shippedAt           DateTime?
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+  metadata            Json?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@index([discordUserId])
+  @@index([status])
+  @@index([shopifyProductId])
+  @@index([shopifyOrderId])
+  @@index([orderNo])
 }

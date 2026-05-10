@@ -80,6 +80,8 @@ export interface OrderDraftOption {
 }
 
 export interface CurrentOrderDraft {
+  orderId?: string;
+  orderNo?: string;
   discordUserId: string;
   stage:
     | "draft_options"
