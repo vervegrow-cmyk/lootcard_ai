@@ -333,16 +333,15 @@ async function ensureProductImageReady(params: {
   imageUrl: string;
   altText: string;
 }): Promise<{ ok: boolean; warning?: string; error?: string }> {
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
-    await sleep(2000);
+  for (let attempt = 1; attempt <= 15; attempt += 1) {
+    await sleep(3000);
+    console.log("[SHOPIFY IMAGE] featuredMedia processing");
     console.log(`[SHOPIFY IMAGE] featuredMedia retry=${attempt}`);
     const state = await verifyProductImageState(params);
-    if (state.ok && state.mediaReady) {
+    if (state.ok && state.featuredReady) {
+      console.log("[SHOPIFY IMAGE] featuredMedia ready");
       console.log("[SHOPIFY IMAGE] product image verified");
-      return {
-        ok: true,
-        warning: state.featuredReady ? undefined : "[SHOPIFY] media uploaded but featuredMedia not ready yet"
-      };
+      return { ok: true };
     }
   }
 
@@ -351,14 +350,21 @@ async function ensureProductImageReady(params: {
     return { ok: false, error: restUpload.error };
   }
 
-  await sleep(2000);
-  const finalState = await verifyProductImageState(params);
-  if (finalState.ok && finalState.mediaReady) {
-    console.log("[SHOPIFY IMAGE] product image verified");
-    return {
-      ok: true,
-      warning: finalState.featuredReady ? undefined : "[SHOPIFY] media uploaded but featuredMedia not ready yet"
-    };
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await sleep(3000);
+    console.log("[SHOPIFY IMAGE] featuredMedia processing");
+    console.log(`[SHOPIFY IMAGE] featuredMedia retry=${attempt}`);
+    const finalState = await verifyProductImageState(params);
+    if (finalState.ok && (finalState.featuredReady || finalState.mediaReady)) {
+      if (finalState.featuredReady) {
+        console.log("[SHOPIFY IMAGE] featuredMedia ready");
+      }
+      console.log("[SHOPIFY IMAGE] product image verified");
+      return {
+        ok: true,
+        warning: finalState.featuredReady ? undefined : "[SHOPIFY] media uploaded but featuredMedia not ready yet"
+      };
+    }
   }
 
   return {
