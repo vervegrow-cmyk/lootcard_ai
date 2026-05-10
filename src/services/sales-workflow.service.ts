@@ -1,9 +1,10 @@
 import {
   ConversationEntry,
-  GeneratedImageResult,
+  CurrentOrderDraft,
   HermesMemory,
   ImageOption,
   LanguagePreference,
+  OrderDraftOption,
   ProjectContext,
   ProjectStage,
   ShippingType
@@ -45,239 +46,295 @@ function inferStyle(message: string, memory: HermesMemory): string {
   if (/(黑金|black gold)/.test(text) && /ssr/.test(text)) {
     return "黑金SSR";
   }
-
-  if (/(黑金|black gold)/.test(text)) {
-    return "黑金限定";
-  }
-
   if (/(赛博朋克|cyberpunk)/.test(text)) {
     return "赛博朋克";
   }
-
-  if (/(anime card|trading card|动漫卡|动漫卡牌)/.test(text)) {
-    return "动漫收藏卡";
+  if (/(签名|signed|signature)/.test(text)) {
+    return "高级收藏签名卡";
   }
 
-  return memory.latestDesignStyle || "高级动漫卡牌";
+  return memory.latestDesignStyle || "动漫卡牌";
 }
 
 function inferCraft(style: string): string {
   if (/黑金|SSR/.test(style)) {
-    return "烫金 + 全息";
+    return "烫金 / 全息 / 动漫角色";
   }
-
   if (/赛博朋克/.test(style)) {
-    return "镭射 + 霓虹浮雕";
+    return "霓虹 / 机甲 / 战斗感";
   }
-
-  return "全息 + 收藏卡工艺";
+  if (/签名/.test(style)) {
+    return "限量 / 签名 / 收藏级";
+  }
+  return "全息 / 收藏卡工艺";
 }
 
-function inferTitle(style: string, memory: HermesMemory): string {
-  if (/黑金|black gold/i.test(style)) {
-    return "Black Gold SSR Anime Card";
+function inferTitle(style: string): string {
+  if (/黑金|SSR/.test(style)) {
+    return "黑金SSR典藏卡";
   }
-
   if (/赛博朋克/.test(style)) {
-    return "Cyberpunk Trading Card";
+    return "赛博朋克战斗卡";
   }
-
-  if (memory.character) {
-    return `${memory.character} Custom Trading Card`;
+  if (/签名/.test(style)) {
+    return "高级收藏签名卡";
   }
-
-  return "Custom AI Trading Card";
+  return "高级动漫收藏卡";
 }
 
-function buildMarketingDescription(params: {
-  style: string;
-  craft: string;
-  shippingType: ShippingType;
-  prompt: string;
-}): string {
-  const shippingText =
-    params.shippingType === "digital_download"
-      ? "Delivery mode: digital download."
-      : params.shippingType === "physical_card_us"
-        ? "Shipping region: United States physical card delivery."
-        : "Shipping region: China / international physical card delivery.";
+function buildCommercialPrompt(baseRequest: string, style: string): string {
+  const stylePromptMap: Record<string, string> = {
+    黑金SSR:
+      "black gold SSR anime trading card, premium foil frame, holographic shine, luxury collectible card, cinematic lighting",
+    赛博朋克:
+      "cyberpunk anime trading card, neon edges, battle posture, futuristic metallic frame, premium collectible composition",
+    高级收藏签名卡:
+      "limited signature anime trading card, premium collector edition, elegant embossing, luxury finish, showcase composition",
+    动漫卡牌:
+      "anime trading card, premium collectible frame, vertical composition, glossy hero card, high detail"
+  };
 
+  const stylePrompt = stylePromptMap[style] || stylePromptMap["动漫卡牌"];
+  return `${stylePrompt}, user request: ${baseRequest}`.replace(/\s+/g, " ").trim();
+}
+
+function buildDescription(option: OrderDraftOption, originalMessage: string): string {
   return [
-    `<p><strong>${params.style}</strong> collectible AI trading card.</p>`,
-    `<p>Craft details: ${params.craft}.</p>`,
-    "<p>Production and delivery usually takes about 30 days.</p>",
-    `<p>${shippingText}</p>`,
-    `<p>Design reference: ${params.prompt}</p>`
+    `<p><strong>${option.title}</strong></p>`,
+    `<p>风格：${option.style}</p>`,
+    `<p>工艺：${inferCraft(option.style)}</p>`,
+    `<p>用户需求：${originalMessage}</p>`,
+    "<p>发货说明：定制商品预计 30 天左右制作并发货。</p>",
+    "<p>定制说明：最终成品将按照当前确认方案生产。</p>"
   ].join("");
 }
 
-function buildPrompt(message: string, memory: HermesMemory, style: string): string {
-  const base =
-    memory.latestPrompt ||
-    "premium anime trading card, collectible layout, vertical card composition, high detail, cinematic lighting";
+function createOptions(message: string, shippingType: ShippingType): OrderDraftOption[] {
+  const optionAStyle = /黑金|ssr/i.test(message) ? "黑金SSR" : "动漫卡牌";
+  const optionBStyle = /赛博朋克|cyberpunk/i.test(message) ? "赛博朋克" : "赛博朋克";
+  const optionCStyle = /签名|收藏|limited/i.test(message) ? "高级收藏签名卡" : "高级收藏签名卡";
 
-  const styleClause = (() => {
-    if (/黑金|black gold/i.test(style)) {
-      return "black gold premium SSR anime trading card, foil stamped frame, holographic shine";
-    }
-    if (/赛博朋克/.test(style)) {
-      return "cyberpunk anime trading card, neon accents, metallic futuristic frame";
-    }
-    return "premium anime trading card, glossy collectible finish, high-detail frame";
-  })();
+  const optionA = {
+    id: "A" as const,
+    title: "黑金SSR典藏卡",
+    style: optionAStyle,
+    description: "黑金 / SSR / 全息 / 动漫角色",
+    estimatedPrice: pricingService.inferPrice("ssr 黑金").price,
+    shippingType,
+    prompt: buildCommercialPrompt(message, optionAStyle)
+  };
 
-  return `${base}, ${styleClause}, user request: ${message}`.replace(/\s+/g, " ").trim();
-}
+  const optionB = {
+    id: "B" as const,
+    title: "赛博朋克战斗卡",
+    style: optionBStyle,
+    description: "赛博朋克 / 霓虹 / 战斗感",
+    estimatedPrice: 39.99,
+    shippingType,
+    prompt: buildCommercialPrompt(message, optionBStyle)
+  };
 
-function buildRevisionPrompt(memory: HermesMemory, message: string): string {
-  return `${memory.latestPrompt || memory.currentPrompt}. Update the existing design with these changes: ${message}`.trim();
+  const optionC = {
+    id: "C" as const,
+    title: "高级收藏签名卡",
+    style: optionCStyle,
+    description: "限量 / 签名 / 收藏级",
+    estimatedPrice: pricingService.inferPrice("限量签名").price,
+    shippingType,
+    prompt: buildCommercialPrompt(message, optionCStyle)
+  };
+
+  return [optionA, optionB, optionC];
 }
 
 async function maybeCreateProject(input: WorkflowInput, prompt: string): Promise<ProjectContext> {
-  return (
-    input.project ||
-    (await memoryService.createProject(input.discordUserId, input.message, prompt))
-  );
+  return input.project || (await memoryService.createProject(input.discordUserId, input.message, prompt));
 }
 
 export class SalesWorkflowService {
-  private async generateSingleImage(prompt: string, style: string): Promise<GeneratedImageResult> {
-    const generated = await imageService.generateImage(prompt, style);
-    if (!generated.ok) {
-      return generated;
-    }
-
-    return generated;
-  }
-
-  async generateDraft(input: WorkflowInput): Promise<WorkflowResponse> {
-    const style = inferStyle(input.message, input.memory);
-    const craft = inferCraft(style);
-    const prompt = buildPrompt(input.message, input.memory, style);
-    const pricing = pricingService.inferPrice(`${style} ${input.message}`);
+  async createDraftOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const shippingType = stateManagerService.inferShippingType(input.message, input.memory);
-    const title = inferTitle(style, input.memory);
-    const description = buildMarketingDescription({
-      style,
-      craft,
-      shippingType,
-      prompt
+    const options = createOptions(input.message, shippingType);
+    const project = await maybeCreateProject(input, options[0].prompt);
+
+    await memoryService.replaceImageOptions(
+      project.projectId,
+      options.map((option) => ({
+        id: option.id,
+        title: option.title,
+        imageUrl: "",
+        prompt: option.prompt,
+        summary: option.description,
+        style: option.style
+      }))
+    );
+    await memoryService.updateProject(project.projectId, {
+      status: "draft_design",
+      currentPrompt: options[0].prompt,
+      finalDesignSummary: options[0].style
     });
 
-    const generated = await this.generateSingleImage(prompt, style);
-    if (!generated.ok) {
+    const currentOrderDraft: CurrentOrderDraft = {
+      discordUserId: input.discordUserId,
+      stage: "draft_options",
+      originalMessage: input.message,
+      options,
+      selectedOption: null,
+      imageUrl: "",
+      productTitle: "",
+      productDescription: "",
+      price: "",
+      shippingType,
+      shopifyProductUrl: ""
+    };
+
+    return {
+      reply: [
+        "✅ 已为你生成 3 个卡牌方案",
+        "",
+        `A. ${options[0].title}`,
+        `价格：$${options[0].estimatedPrice.toFixed(2)}`,
+        `风格：${options[0].description}`,
+        "",
+        `B. ${options[1].title}`,
+        `价格：$${options[1].estimatedPrice.toFixed(2)}`,
+        `风格：${options[1].description}`,
+        "",
+        `C. ${options[2].title}`,
+        `价格：$${options[2].estimatedPrice.toFixed(2)}`,
+        `风格：${options[2].description}`,
+        "",
+        "回复 A / B / C 选择方案。",
+        "也可以回复“修改A：更暗黑一点”。"
+      ].join("\n"),
+      stage: "draft_design",
+      memoryPatch: {
+        stage: "draft_design",
+        currentStage: "draft_design",
+        latestPrompt: options[0].prompt,
+        latestDesignStyle: options[0].style,
+        latestPrice: options[0].estimatedPrice.toFixed(2),
+        latestShippingType: shippingType,
+        currentOrderDraft
+      }
+    };
+  }
+
+  async generateImageForSelectedOption(input: WorkflowInput, selectedId: "A" | "B" | "C"): Promise<WorkflowResponse> {
+    const draft = input.memory.currentOrderDraft;
+    const selectedOption = draft?.options.find((option) => option.id === selectedId) || null;
+
+    if (!draft || !selectedOption) {
       return {
-        reply: `图片生成失败：${generated.error || "未知错误"}`,
+        reply: "我还没有可选方案，请先让我为你生成 A/B/C 方案。",
         stage: input.memory.currentStage || "idle",
         memoryPatch: {}
       };
     }
 
-    const project = await maybeCreateProject(input, prompt);
-    const nextStage = stateManagerService.nextStageAfterImage();
+    const generated = await imageService.generateImage(selectedOption.prompt, selectedOption.style);
+    if (!generated.ok) {
+      return {
+        reply: `图片生成失败：${generated.error || "未知错误"}`,
+        stage: "draft_design",
+        memoryPatch: {}
+      };
+    }
 
-    await memoryService.updateProject(project.projectId, {
-      status: nextStage,
-      currentPrompt: prompt,
-      finalDesignSummary: style
-    });
-
-    const option: ImageOption = {
-      id: "A",
-      title,
-      imageUrl: generated.imageUrl || "",
-      prompt,
-      summary: generated.summary,
-      style,
-      provider: generated.imageProvider,
-      model: generated.imageModel
-    };
-    await memoryService.replaceImageOptions(project.projectId, [option]);
+    if (input.project?.projectId) {
+      await memoryService.updateProject(input.project.projectId, {
+        status: "waiting_confirmation",
+        currentPrompt: selectedOption.prompt,
+        finalDesignSummary: selectedOption.style
+      });
+    }
 
     return {
       reply: [
-        "✅ 已生成首版卡牌设计",
+        "✅ 已生成首版设计图",
         "",
-        `风格：${style}`,
-        `工艺：${craft}`,
-        "尺寸：Trading Card",
-        "",
-        "请选择：",
-        "",
-        "1️⃣ 生成购买链接",
+        "回复：",
+        "1️⃣ 确认并生成下单链接",
         "2️⃣ 修改设计",
         "3️⃣ 再生成几个方案"
       ].join("\n"),
-      stage: nextStage,
+      stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
-        stage: nextStage,
-        currentStage: nextStage,
-        style,
-        currentPrompt: prompt,
-        latestPrompt: prompt,
+        stage: "waiting_confirmation",
+        currentStage: "waiting_confirmation",
+        selectedOption: selectedOption.id,
+        selectedOptionTitle: selectedOption.title,
+        selectedDesignSummary: selectedOption.description,
+        selectedImageUrl: generated.imageUrl || "",
         latestImageUrl: generated.imageUrl || "",
-        latestDesignStyle: style,
+        currentPrompt: selectedOption.prompt,
+        latestPrompt: selectedOption.prompt,
+        latestDesignStyle: selectedOption.style,
         latestImageProvider: generated.imageProvider || "",
         latestImageModel: generated.imageModel || "",
-        latestPrice: pricing.price.toFixed(2),
-        latestShippingType: shippingType,
-        latestProductTitle: title,
-        latestProductDescription: description,
-        selectedImageUrl: generated.imageUrl || "",
-        selectedDesignSummary: style,
-        selectedOption: "A",
-        selectedOptionTitle: title,
-        preferredStyles: Array.from(new Set([...input.memory.preferredStyles, style])),
-        rarity: /SSR/i.test(style) ? "SSR" : input.memory.rarity
+        latestPrice: selectedOption.estimatedPrice.toFixed(2),
+        latestShippingType: selectedOption.shippingType,
+        latestProductTitle: selectedOption.title,
+        latestProductDescription: buildDescription(selectedOption, draft.originalMessage),
+        currentOrderDraft: {
+          ...draft,
+          stage: "waiting_confirmation",
+          selectedOption,
+          imageUrl: generated.imageUrl || "",
+          productTitle: selectedOption.title,
+          productDescription: buildDescription(selectedOption, draft.originalMessage),
+          price: selectedOption.estimatedPrice.toFixed(2),
+          shippingType: selectedOption.shippingType
+        }
       }
     };
   }
 
-  async modifyDraft(input: WorkflowInput): Promise<WorkflowResponse> {
-    if (!input.memory.latestPrompt) {
-      return this.generateDraft(input);
+  async modifyCurrentDesign(input: WorkflowInput): Promise<WorkflowResponse> {
+    const draft = input.memory.currentOrderDraft;
+    const selected = draft?.selectedOption;
+
+    if (!draft || !selected) {
+      return this.createDraftOptions(input);
     }
 
-    const style = inferStyle(input.message, input.memory);
-    const craft = inferCraft(style);
-    const prompt = buildRevisionPrompt(input.memory, input.message);
-    const generated = await this.generateSingleImage(prompt, style);
-
+    const revisedPrompt = `${selected.prompt}. Modify this design according to: ${input.message}`;
+    const generated = await imageService.generateImage(revisedPrompt, selected.style);
     if (!generated.ok) {
       return {
         reply: `图片生成失败：${generated.error || "未知错误"}`,
-        stage: input.memory.currentStage || "waiting_confirmation",
+        stage: "waiting_confirmation",
         memoryPatch: {}
       };
     }
+
+    const updatedOption: OrderDraftOption = {
+      ...selected,
+      description: `${selected.description} / 已按要求修改`
+    };
 
     if (input.project?.projectId) {
       await memoryService.saveFeedbackLog({
         projectId: input.project.projectId,
         discordUserId: input.discordUserId,
         feedbackText: input.message,
-        oldPrompt: input.memory.latestPrompt,
-        newPrompt: prompt
+        oldPrompt: selected.prompt,
+        newPrompt: revisedPrompt
       });
       await memoryService.updateProject(input.project.projectId, {
         status: "waiting_confirmation",
-        currentPrompt: prompt,
-        finalDesignSummary: style
+        currentPrompt: revisedPrompt,
+        finalDesignSummary: updatedOption.style
       });
     }
 
     return {
       reply: [
-        "✅ 已根据你的要求更新设计",
+        "✅ 已更新设计图",
         "",
-        `风格：${style}`,
-        `工艺：${craft}`,
-        "尺寸：Trading Card",
-        "",
-        "请选择：",
-        "",
-        "1️⃣ 生成购买链接",
+        "回复：",
+        "1️⃣ 确认并生成下单链接",
         "2️⃣ 继续修改设计",
         "3️⃣ 再生成几个方案"
       ].join("\n"),
@@ -286,173 +343,185 @@ export class SalesWorkflowService {
       memoryPatch: {
         stage: "waiting_confirmation",
         currentStage: "waiting_confirmation",
-        currentPrompt: prompt,
-        latestPrompt: prompt,
+        currentPrompt: revisedPrompt,
+        latestPrompt: revisedPrompt,
         latestImageUrl: generated.imageUrl || "",
-        latestDesignStyle: style,
+        selectedImageUrl: generated.imageUrl || "",
+        latestDesignStyle: updatedOption.style,
         latestImageProvider: generated.imageProvider || "",
         latestImageModel: generated.imageModel || "",
-        selectedImageUrl: generated.imageUrl || "",
-        selectedDesignSummary: style,
-        revisionHistory: [...input.memory.revisionHistory, input.message].slice(-10)
+        revisionHistory: [...input.memory.revisionHistory, input.message].slice(-10),
+        currentOrderDraft: {
+          ...draft,
+          stage: "waiting_confirmation",
+          selectedOption: { ...updatedOption, prompt: revisedPrompt },
+          imageUrl: generated.imageUrl || "",
+          productDescription: buildDescription(updatedOption, draft.originalMessage)
+        }
       }
     };
   }
 
-  async generateMoreOptions(input: WorkflowInput): Promise<WorkflowResponse> {
-    const seedPrompt = input.memory.latestPrompt || buildPrompt(input.message, input.memory, inferStyle(input.message, input.memory));
-    const style = inferStyle(input.message, input.memory);
-    const results = await imageService.generateImages({
-      prompt: `${seedPrompt}. Create variation candidates for this design.`,
-      count: 3
-    });
-
-    if (!results.length) {
-      return {
-        reply: "图片生成失败：没有生成到可用方案。",
-        stage: input.memory.currentStage || "waiting_confirmation",
-        memoryPatch: {}
-      };
-    }
+  async regenerateOptions(input: WorkflowInput): Promise<WorkflowResponse> {
+    const draft = input.memory.currentOrderDraft;
+    const baseMessage = draft?.originalMessage || input.message;
+    const baseOptions = createOptions(`${baseMessage} ${input.message}`, draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory));
+    const refreshed = baseOptions.map((option, index) => ({
+      ...option,
+      title: index === 0 ? "黑金SSR典藏卡" : index === 1 ? "赛博朋克战斗卡" : "高级收藏签名卡"
+    }));
 
     if (input.project?.projectId) {
-      await memoryService.replaceImageOptions(input.project.projectId, results);
+      await memoryService.replaceImageOptions(
+        input.project.projectId,
+        refreshed.map((option) => ({
+          id: option.id,
+          title: option.title,
+          imageUrl: "",
+          prompt: option.prompt,
+          summary: option.description,
+          style: option.style
+        }))
+      );
       await memoryService.updateProject(input.project.projectId, {
-        status: "waiting_confirmation",
-        currentPrompt: seedPrompt,
-        finalDesignSummary: style
+        status: "draft_design",
+        currentPrompt: refreshed[0].prompt,
+        finalDesignSummary: refreshed[0].style
       });
     }
 
     return {
       reply: [
-        "✅ 已再生成几个方案",
+        "✅ 已重新生成 3 个卡牌方案",
         "",
-        `风格：${style}`,
-        "我先把 3 张方案发给你。",
-        "如果你满意其中一张，直接回复“1 生成链接”即可。",
-        "如果还要调整，直接告诉我你想改哪里。"
+        `A. ${refreshed[0].title}`,
+        `价格：$${refreshed[0].estimatedPrice.toFixed(2)}`,
+        `风格：${refreshed[0].description}`,
+        "",
+        `B. ${refreshed[1].title}`,
+        `价格：$${refreshed[1].estimatedPrice.toFixed(2)}`,
+        `风格：${refreshed[1].description}`,
+        "",
+        `C. ${refreshed[2].title}`,
+        `价格：$${refreshed[2].estimatedPrice.toFixed(2)}`,
+        `风格：${refreshed[2].description}`,
+        "",
+        "回复 A / B / C 选择方案。",
+        "也可以继续告诉我你想修改的方向。"
       ].join("\n"),
-      stage: "waiting_confirmation",
-      imageUrls: results.map((item) => item.imageUrl).filter(Boolean),
+      stage: "draft_design",
       memoryPatch: {
-        stage: "waiting_confirmation",
-        currentStage: "waiting_confirmation",
-        latestPrompt: seedPrompt,
-        currentPrompt: seedPrompt,
-        latestDesignStyle: style,
-        latestImageUrl: results[0]?.imageUrl || input.memory.latestImageUrl,
-        selectedImageUrl: results[0]?.imageUrl || input.memory.selectedImageUrl,
-        selectedOption: results[0]?.id || "A",
-        selectedOptionTitle: results[0]?.title || input.memory.selectedOptionTitle
+        stage: "draft_design",
+        currentStage: "draft_design",
+        currentOrderDraft: {
+          discordUserId: input.discordUserId,
+          stage: "draft_options",
+          originalMessage: baseMessage,
+          options: refreshed,
+          selectedOption: null,
+          imageUrl: "",
+          productTitle: "",
+          productDescription: "",
+          price: "",
+          shippingType: refreshed[0].shippingType,
+          shopifyProductUrl: ""
+        }
       }
     };
   }
 
   async createOrderLink(input: WorkflowInput): Promise<WorkflowResponse> {
-    if (!input.memory.latestImageUrl || !input.memory.latestPrompt) {
+    const draft = input.memory.currentOrderDraft;
+
+    if (draft?.shopifyProductUrl) {
       return {
-        reply: "我还没有可下单的最终设计，请先让我帮你生成一版卡牌图。",
+        reply: [
+          "✅ 下单链接已生成",
+          "",
+          `商品：${draft.productTitle || input.memory.latestProductTitle || "Custom AI Trading Card"}`,
+          `价格：$${draft.price || input.memory.latestPrice || "29.99"}`,
+          `下单链接：${draft.shopifyProductUrl}`,
+          "",
+          "点击即可付款。"
+        ].join("\n"),
+        stage: "payment_stage",
+        memoryPatch: {}
+      };
+    }
+
+    if (!draft || !(draft.stage === "image_generated" || draft.stage === "waiting_confirmation") || !draft.selectedOption || !draft.imageUrl) {
+      return {
+        reply: "我还没有你的确认设计，请先选择方案并生成设计图。",
         stage: input.memory.currentStage || "idle",
         memoryPatch: {}
       };
     }
 
-    const style = input.memory.latestDesignStyle || inferStyle(input.message, input.memory);
-    const craft = inferCraft(style);
-    const shippingType = input.memory.latestShippingType || stateManagerService.inferShippingType(input.message, input.memory);
-    const title = input.memory.latestProductTitle || inferTitle(style, input.memory);
-    const price = Number(input.memory.latestPrice || pricingService.inferPrice(style).price);
-    const description =
-      input.memory.latestProductDescription ||
-      buildMarketingDescription({
-        style,
-        craft,
-        shippingType,
-        prompt: input.memory.latestPrompt
-      });
-
-    if (input.project?.projectId) {
-      await memoryService.updateProject(input.project.projectId, {
-        status: "creating_shopify_product",
-        currentPrompt: input.memory.latestPrompt,
-        finalDesignSummary: style
-      });
-    }
-
     const created = await shopifyService.createShopifyProductFromDiscord({
-      title,
-      price,
-      description,
-      imageUrl: input.memory.latestImageUrl,
-      shippingType,
-      tags: [
-        "discord-order",
-        "lootcard-ai",
-        style,
-        shippingType,
-        craft.replace(/\s+/g, "-")
-      ],
-      seoTitle: title,
-      seoDescription: `${title} by LootCard AI. ${craft}. Production and delivery usually takes about 30 days.`
+      title: draft.selectedOption.title,
+      price: Number(draft.price || draft.selectedOption.estimatedPrice),
+      description: draft.productDescription || buildDescription(draft.selectedOption, draft.originalMessage),
+      imageUrl: draft.imageUrl,
+      shippingType: draft.shippingType,
+      tags: ["discord-order", "custom-card", "lootcard-ai", draft.selectedOption.style],
+      seoTitle: draft.selectedOption.title,
+      seoDescription: `${draft.selectedOption.title} by LootCard AI. ${draft.selectedOption.description}. 定制商品预计 30 天左右发货。`
     });
 
     if (!created.ok || !created.productUrl) {
       return {
         reply: `Shopify 产品创建失败：${created.error || "未知错误"}`,
         stage: "waiting_confirmation",
-        memoryPatch: {
-          stage: "waiting_confirmation",
-          currentStage: "waiting_confirmation"
-        }
+        memoryPatch: {}
       };
     }
 
-    if (input.project?.projectId && created.productId) {
+    if (input.project?.projectId) {
       await memoryService.updateProject(input.project.projectId, {
         status: "payment_stage",
-        currentPrompt: input.memory.latestPrompt,
-        finalDesignSummary: style,
+        currentPrompt: draft.selectedOption.prompt,
+        finalDesignSummary: draft.selectedOption.style,
         shopifyProductId: created.productId,
         shopifyProductUrl: created.productUrl
       });
-      await memoryService.logShopifyProduct({
-        projectId: input.project.projectId,
-        discordUserId: input.discordUserId,
-        shopifyProductId: created.productId,
-        shopifyProductUrl: created.productUrl,
-        title,
-        price: price.toFixed(2),
-        sku: created.variantId || `DISCORD-${Date.now()}`
-      });
+      if (created.productId) {
+        await memoryService.logShopifyProduct({
+          projectId: input.project.projectId,
+          discordUserId: input.discordUserId,
+          shopifyProductId: created.productId,
+          shopifyProductUrl: created.productUrl,
+          title: draft.selectedOption.title,
+          price: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
+          sku: created.variantId || `DISCORD-${Date.now()}`
+        });
+      }
     }
 
     return {
       reply: [
-        "✅ 您的专属卡牌已生成",
+        "✅ 下单链接已生成",
         "",
-        `商品名：${title}`,
-        "",
-        `价格：$${price.toFixed(2)}`,
-        "",
-        `工艺：${craft}`,
-        "",
+        `商品：${draft.selectedOption.title}`,
+        `价格：$${Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2)}`,
         `下单链接：${created.productUrl}`,
         "",
-        "点击即可直接购买。"
+        "点击即可付款。"
       ].join("\n"),
       stage: "payment_stage",
       memoryPatch: {
         stage: "payment_stage",
         currentStage: "payment_stage",
-        latestProductTitle: title,
-        latestProductDescription: description,
-        latestPrice: price.toFixed(2),
-        latestShippingType: shippingType,
         latestShopifyProductId: created.productId || "",
         latestShopifyProductUrl: created.productUrl,
-        shopifyProductUrl: created.productUrl,
-        recentPurchaseContent: title
+        latestProductTitle: draft.selectedOption.title,
+        latestProductDescription: draft.productDescription,
+        latestPrice: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
+        currentOrderDraft: {
+          ...draft,
+          stage: "shopify_created",
+          shopifyProductUrl: created.productUrl
+        },
+        shopifyProductUrl: created.productUrl
       }
     };
   }

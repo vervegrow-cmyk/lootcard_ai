@@ -69,6 +69,36 @@ export interface GeneratedImageResult {
   error?: string;
 }
 
+export interface OrderDraftOption {
+  id: "A" | "B" | "C";
+  title: string;
+  style: string;
+  description: string;
+  estimatedPrice: number;
+  shippingType: ShippingType;
+  prompt: string;
+}
+
+export interface CurrentOrderDraft {
+  discordUserId: string;
+  stage:
+    | "draft_options"
+    | "option_selected"
+    | "image_generated"
+    | "waiting_confirmation"
+    | "shopify_created"
+    | "completed";
+  originalMessage: string;
+  options: OrderDraftOption[];
+  selectedOption?: OrderDraftOption | null;
+  imageUrl: string;
+  productTitle: string;
+  productDescription: string;
+  price: string;
+  shippingType: ShippingType;
+  shopifyProductUrl: string;
+}
+
 export interface ShopifyProductDraft {
   title: string;
   description: string;
@@ -151,6 +181,7 @@ export interface HermesMemory {
   shopifyProductUrl: string;
   recentPurchaseContent: string;
   preferredStyles: string[];
+  currentOrderDraft?: CurrentOrderDraft | null;
 }
 
 export interface UserMemorySnapshot {
@@ -222,7 +253,8 @@ export const EMPTY_HERMES_MEMORY: HermesMemory = {
   latestShopifyProductUrl: "",
   shopifyProductUrl: "",
   recentPurchaseContent: "",
-  preferredStyles: []
+  preferredStyles: [],
+  currentOrderDraft: null
 };
 
 export function memoryToRequirements(memory: HermesMemory): CardRequirements {

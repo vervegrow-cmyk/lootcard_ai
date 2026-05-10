@@ -1,7 +1,7 @@
 import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
+import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
 import { aiRouterService } from "../services/ai-router.service";
 import { memoryService } from "../services/memory.service";
-import { openRouterService } from "../services/openrouter.service";
 import { salesWorkflowService } from "../services/sales-workflow.service";
 import { stateManagerService } from "../services/state-manager.service";
 import { logger } from "../utils/logger";
@@ -109,7 +109,7 @@ export class DiscordBot {
       };
 
       const language = detectLanguage(inbound.content);
-      console.log("[Raw User Message]", inbound.content);
+      console.log("[DISCORD] incoming message", inbound.content);
 
       if (isEchoModeEnabled()) {
         await message.reply(`Echo: ${inbound.content}`);
@@ -131,6 +131,32 @@ export class DiscordBot {
         const project = await memoryService.getLatestProject(inbound.discordUserId);
         const taskType = aiRouterService.detectTaskType(inbound.content);
 
+        console.log("[AGENT] route start");
+        const plan = hermesOrchestratorAgent.plan({
+          discordUserId: inbound.discordUserId,
+          username: inbound.username,
+          message: inbound.content,
+          memory: {
+            ...snapshot.memory,
+            currentProject: project?.projectId || "",
+            imageOptions:
+              snapshot.memory.currentOrderDraft?.options.map((option) => ({
+                id: option.id,
+                title: option.title,
+                imageUrl: "",
+                prompt: option.prompt,
+                summary: option.description,
+                style: option.style
+              })) || []
+          },
+          recentConversation
+        });
+        console.log("[AGENT] route result", {
+          intent: plan.intent,
+          targetAgent: plan.targetAgent,
+          targetSkill: plan.targetSkill
+        });
+
         console.log(`[AI ROUTER] taskType=${taskType}`);
 
         const workflowInput = {
@@ -144,15 +170,21 @@ export class DiscordBot {
         } as const;
 
         let workflowResult;
+        const draft = snapshot.memory.currentOrderDraft;
+        console.log(`[ORDER_FLOW] stage=${draft?.stage || snapshot.memory.currentStage || "idle"}`);
 
-        if (stateManagerService.isPurchaseConfirmation(inbound.content)) {
+        const selectedDraftOption = stateManagerService.detectDraftSelection(inbound.content, draft);
+
+        if (stateManagerService.isPurchaseConfirmation(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
           workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
-        } else if (stateManagerService.wantsModification(inbound.content) && snapshot.memory.latestPrompt) {
-          workflowResult = await salesWorkflowService.modifyDraft(workflowInput);
-        } else if (stateManagerService.wantsMoreOptions(inbound.content) && snapshot.memory.latestPrompt) {
-          workflowResult = await salesWorkflowService.generateMoreOptions(workflowInput);
+        } else if (selectedDraftOption) {
+          workflowResult = await salesWorkflowService.generateImageForSelectedOption(workflowInput, selectedDraftOption);
+        } else if (stateManagerService.wantsModification(inbound.content) && draft) {
+          workflowResult = await salesWorkflowService.modifyCurrentDesign(workflowInput);
+        } else if (stateManagerService.wantsMoreOptions(inbound.content) && draft) {
+          workflowResult = await salesWorkflowService.regenerateOptions(workflowInput);
         } else if (taskType === "image_generation") {
-          workflowResult = await salesWorkflowService.generateDraft(workflowInput);
+          workflowResult = await salesWorkflowService.createDraftOptions(workflowInput);
         } else if (taskType === "shopify_product_create") {
           workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
         } else {

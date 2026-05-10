@@ -4,6 +4,7 @@ export type ProjectStage =
   | "idle"
   | "customer_service"
   | "collecting"
+  | "prompting"
   | "generating"
   | "selecting"
   | "revising"
@@ -33,6 +34,36 @@ export interface ImageOption {
   style?: string;
   provider?: string;
   model?: string;
+}
+
+export interface OrderDraftOption {
+  id: "A" | "B" | "C";
+  title: string;
+  style: string;
+  description: string;
+  estimatedPrice: number;
+  shippingType: ShippingType;
+  prompt: string;
+}
+
+export interface CurrentOrderDraft {
+  discordUserId: string;
+  stage:
+    | "draft_options"
+    | "option_selected"
+    | "image_generated"
+    | "waiting_confirmation"
+    | "shopify_created"
+    | "completed";
+  originalMessage: string;
+  options: OrderDraftOption[];
+  selectedOption?: OrderDraftOption | null;
+  imageUrl: string;
+  productTitle: string;
+  productDescription: string;
+  price: string;
+  shippingType: ShippingType;
+  shopifyProductUrl: string;
 }
 
 export interface ProjectMemory {
@@ -68,6 +99,7 @@ export interface ProjectMemory {
   latestShopifyProductUrl: string;
   recentPurchaseContent: string;
   preferredStyles: string[];
+  currentOrderDraft?: CurrentOrderDraft | null;
 }
 
 export interface DesignRequirements {
@@ -157,5 +189,6 @@ export const EMPTY_PROJECT_MEMORY: ProjectMemory = {
   latestShopifyProductId: "",
   latestShopifyProductUrl: "",
   recentPurchaseContent: "",
-  preferredStyles: []
+  preferredStyles: [],
+  currentOrderDraft: null
 };
