@@ -275,7 +275,8 @@ export class OrderService {
       productDescription: order.productDescription || "",
       price: order.price?.toString() || "",
       shippingType: (order.shippingType as CurrentOrderDraft["shippingType"]) || "physical_card_cn",
-      shopifyProductUrl: order.shopifyProductUrl || order.shopifyCheckoutUrl || ""
+      shopifyProductUrl: order.shopifyProductUrl || "",
+      shopifyCheckoutUrl: order.shopifyCheckoutUrl || order.shopifyProductUrl || ""
     };
   }
 

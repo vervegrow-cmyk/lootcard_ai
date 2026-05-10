@@ -456,20 +456,29 @@ export class SalesWorkflowService {
     };
   }
 
-  async createOrderLink(input: WorkflowInput): Promise<WorkflowResponse> {
+  async createOrderLink(
+    input: WorkflowInput,
+    requestedLinkType: "product" | "checkout" = "product"
+  ): Promise<WorkflowResponse> {
     const draft = input.memory.currentOrderDraft;
 
     if (draft?.shopifyProductUrl) {
+      const resolvedCheckoutUrl =
+        draft.shopifyCheckoutUrl ||
+        (draft.orderId ? (await orderService.getOrderById(draft.orderId))?.shopifyCheckoutUrl || "" : "") ||
+        draft.shopifyProductUrl;
+      const resolvedLink = requestedLinkType === "checkout" ? resolvedCheckoutUrl : draft.shopifyProductUrl;
+      const linkLabel = requestedLinkType === "checkout" ? "付款链接" : "产品链接";
+
       return {
         reply: [
-          "✅ 下单链接已生成",
+          requestedLinkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
           "",
           `订单号：${draft.orderNo || "-"}`,
           `商品：${draft.productTitle || input.memory.latestProductTitle || "Custom AI Trading Card"}`,
           `价格：$${draft.price || input.memory.latestPrice || "29.99"}`,
-          `下单链接：${draft.shopifyProductUrl}`,
-          "",
-          "点击即可付款。"
+          `${linkLabel}：${resolvedLink}`,
+          ...(requestedLinkType === "product" ? ["", "如需直接付款，请回复“付款链接”。"] : [])
         ].join("\n"),
         stage: "payment_stage",
         memoryPatch: {}
@@ -496,8 +505,9 @@ export class SalesWorkflowService {
     });
 
     const checkoutUrl = created.checkoutUrl || created.productUrl;
+    const productUrl = created.productUrl || checkoutUrl;
 
-    if (!created.ok || !checkoutUrl) {
+    if (!created.ok || !checkoutUrl || !productUrl) {
       return {
         reply: `Shopify 产品创建失败：${created.error || "未知错误"}`,
         stage: "waiting_confirmation",
@@ -509,16 +519,16 @@ export class SalesWorkflowService {
       const numericProductId = created.productId?.split("/").pop() || created.productId;
       const numericVariantId = created.variantId?.split("/").pop() || created.variantId;
       await orderService.markShopifyCreated(draft.orderId);
-      await orderService.attachShopifyProduct(draft.orderId, {
-        shopifyShop: created.shop,
-        shopifyProductId: numericProductId,
-        shopifyProductGid: created.productId,
-        shopifyVariantId: numericVariantId,
-        shopifyVariantGid: created.variantId,
-        shopifyProductUrl: created.productUrl,
-        shopifyCheckoutUrl: checkoutUrl,
-        productTitle: draft.selectedOption.title,
-        productDescription: draft.productDescription,
+        await orderService.attachShopifyProduct(draft.orderId, {
+          shopifyShop: created.shop,
+          shopifyProductId: numericProductId,
+          shopifyProductGid: created.productId,
+          shopifyVariantId: numericVariantId,
+          shopifyVariantGid: created.variantId,
+          shopifyProductUrl: productUrl,
+          shopifyCheckoutUrl: checkoutUrl,
+          productTitle: draft.selectedOption.title,
+          productDescription: draft.productDescription,
         price: Number(draft.price || draft.selectedOption.estimatedPrice),
         metadata: {
           source: "discord",
@@ -533,14 +543,14 @@ export class SalesWorkflowService {
         currentPrompt: draft.selectedOption.prompt,
         finalDesignSummary: draft.selectedOption.style,
         shopifyProductId: created.productId,
-        shopifyProductUrl: checkoutUrl
+        shopifyProductUrl: productUrl
       });
       if (created.productId) {
         await memoryService.logShopifyProduct({
           projectId: input.project.projectId,
           discordUserId: input.discordUserId,
           shopifyProductId: created.productId,
-          shopifyProductUrl: checkoutUrl,
+          shopifyProductUrl: productUrl,
           title: draft.selectedOption.title,
           price: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
           sku: created.variantId || `DISCORD-${Date.now()}`
@@ -548,32 +558,35 @@ export class SalesWorkflowService {
       }
     }
 
+    const finalLink = requestedLinkType === "checkout" ? checkoutUrl : productUrl;
+    const linkLabel = requestedLinkType === "checkout" ? "付款链接" : "产品链接";
+
     return {
       reply: [
-        "✅ 下单链接已生成",
+        requestedLinkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
         "",
         `订单号：${draft.orderNo || "-"}`,
         `商品：${draft.selectedOption.title}`,
         `价格：$${Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2)}`,
-        `下单链接：${checkoutUrl}`,
-        "",
-        "点击即可付款。"
+        `${linkLabel}：${finalLink}`,
+        ...(requestedLinkType === "product" ? ["", "如需直接付款，请回复“付款链接”。"] : [])
       ].join("\n"),
       stage: "payment_stage",
       memoryPatch: {
         stage: "payment_stage",
         currentStage: "payment_stage",
         latestShopifyProductId: created.productId || "",
-        latestShopifyProductUrl: checkoutUrl,
+        latestShopifyProductUrl: productUrl,
         latestProductTitle: draft.selectedOption.title,
         latestProductDescription: draft.productDescription,
         latestPrice: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
         currentOrderDraft: {
           ...draft,
           stage: "shopify_created",
-          shopifyProductUrl: checkoutUrl
+          shopifyProductUrl: productUrl,
+          shopifyCheckoutUrl: checkoutUrl
         },
-        shopifyProductUrl: checkoutUrl
+        shopifyProductUrl: productUrl
       }
     };
   }

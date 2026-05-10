@@ -177,7 +177,7 @@ async function checkImageReachable(imageUrl: string): Promise<{ ok: boolean; err
   try {
     console.log(`[SHOPIFY] imageUrl=${imageUrl}`);
     const response = await fetch(imageUrl, { method: "GET" });
-    console.log(`[SHOPIFY] image reachable check status=${response.status}`);
+    console.log(`[SHOPIFY] image reachable status=${response.status}`);
     if (!response.ok) {
       return {
         ok: false,
@@ -187,7 +187,7 @@ async function checkImageReachable(imageUrl: string): Promise<{ ok: boolean; err
 
     return { ok: true };
   } catch (error) {
-    console.log("[SHOPIFY] image reachable check status=0");
+    console.log("[SHOPIFY] image reachable status=0");
     return {
       ok: false,
       error: error instanceof Error ? error.message : "图片链接已失效，请重新生成图片。"
@@ -356,7 +356,7 @@ async function updateVariantPricing(params: {
     return { ok: false, error: userErrors.map((item) => item.message).join("; ") };
   }
 
-  console.log(`[SHOPIFY] variant price set price=${params.price.toFixed(2)}`);
+  console.log(`[SHOPIFY] variant price set=${params.price.toFixed(2)}`);
   console.log(`[SHOPIFY] variantId=${params.variantId}`);
   console.log("[SHOPIFY] variant created");
   return { ok: true };
@@ -501,7 +501,7 @@ async function validateCreatedProduct(params: {
     });
 
     if (!response.ok || !response.data) {
-      if (attempt === 4) {
+      if (attempt === 5) {
         return {
           ok: false,
           error: `Shopify validation query failed: ${response.status} ${response.text}`
@@ -513,7 +513,7 @@ async function validateCreatedProduct(params: {
 
     const errors = collectGraphqlErrors(response.data);
     if (errors.length) {
-      if (attempt === 4) {
+      if (attempt === 5) {
         return { ok: false, error: errors.join("; ") };
       }
       await sleep(1500);
@@ -545,6 +545,8 @@ async function validateCreatedProduct(params: {
     }
 
     if (attempt < 5) {
+      console.log(`[SHOPIFY] variant verify price=${variant?.price || "0.00"}`);
+      console.log(`[SHOPIFY] media not ready retry=${attempt}`);
       continue;
     }
 
@@ -559,12 +561,14 @@ async function validateCreatedProduct(params: {
       };
     }
 
+    console.log(`[SHOPIFY] variant verify price=${variant?.price || "0.00"}`);
+    console.log("[SHOPIFY] media uploaded but featuredMedia not ready yet");
     return {
       ok: true,
       productUrl: product?.onlineStoreUrl || `https://${params.shop}/products/${product?.handle || ""}`,
       featuredMediaUrl: featuredMediaUrl || mediaUrl,
       variantId: variant.id,
-      mediaReady: false,
+      mediaReady: Boolean(mediaUrl),
       featuredMediaReady: false
     };
   }
@@ -719,6 +723,8 @@ export async function createShopifyProductGraphql(
     return { ok: false, error: validation.error };
   }
 
+  console.log(`[SHOPIFY] variant verify price=${input.price.toFixed(2)}`);
+
   if (!validation.featuredMediaReady) {
     console.log("[SHOPIFY] media uploaded but featuredMedia not ready yet");
   } else {
@@ -737,6 +743,7 @@ export async function createShopifyProductGraphql(
     : `https://${input.shop}/admin/products`;
 
   console.log(`[SHOPIFY] productUrl=${productUrl}`);
+  console.log(`[SHOPIFY] cartUrl=${checkoutUrl}`);
   console.log(`[SHOPIFY] checkout url generated ${checkoutUrl}`);
   if (cartLink) {
     console.log("[SHOPIFY] product page price mismatch possible theme issue");
@@ -849,7 +856,7 @@ export async function createShopifyProductRest(
     return { ok: false, error: "Shopify REST validation failed: product media is missing." };
   }
 
-  console.log(`[SHOPIFY] variant price set price=${input.price.toFixed(2)}`);
+  console.log(`[SHOPIFY] variant price set=${input.price.toFixed(2)}`);
   console.log(`[SHOPIFY] variantId=${variant.id}`);
   console.log("[SHOPIFY] variant created");
   console.log("[SHOPIFY] media uploaded");
@@ -861,6 +868,7 @@ export async function createShopifyProductRest(
   const adminUrl = `https://admin.shopify.com/store/${adminStoreSlug}/products/${product.id}`;
 
   console.log(`[SHOPIFY] productUrl=${productUrl}`);
+  console.log(`[SHOPIFY] cartUrl=${checkoutUrl}`);
   console.log(`[SHOPIFY] checkout url generated ${checkoutUrl}`);
 
   return {

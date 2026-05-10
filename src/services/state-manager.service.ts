@@ -5,6 +5,16 @@ function hasAny(text: string, keywords: string[]): boolean {
 }
 
 export class StateManagerService {
+  wantsCheckoutLink(message: string): boolean {
+    const text = message.toLowerCase();
+    return hasAny(text, ["付款链接", "结账链接", "直接付款", "checkout", "cart", "payment link"]);
+  }
+
+  wantsProductLink(message: string): boolean {
+    const text = message.toLowerCase();
+    return hasAny(text, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接"]);
+  }
+
   isPurchaseConfirmation(message: string): boolean {
     const text = message.trim().toLowerCase();
     return (

@@ -99,6 +99,7 @@ export interface CurrentOrderDraft {
   price: string;
   shippingType: ShippingType;
   shopifyProductUrl: string;
+  shopifyCheckoutUrl?: string;
 }
 
 export interface ShopifyProductDraft {

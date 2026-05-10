@@ -242,8 +242,13 @@ export class DiscordBot {
         if (isOrderQuery(inbound.content)) {
           finalReply = await formatRecentOrders(inbound.discordUserId);
           workflowResult = null;
-        } else if (stateManagerService.isPurchaseConfirmation(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
-          workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
+        } else if (stateManagerService.wantsCheckoutLink(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
+          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "checkout");
+        } else if (
+          (stateManagerService.isPurchaseConfirmation(inbound.content) || stateManagerService.wantsProductLink(inbound.content)) &&
+          stateManagerService.canCreateShopifyFromDraft(draft)
+        ) {
+          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "product");
         } else if (selectedDraftOption) {
           workflowResult = await salesWorkflowService.generateImageForSelectedOption(workflowInput, selectedDraftOption);
         } else if (stateManagerService.wantsModification(inbound.content) && draft) {
@@ -284,7 +289,8 @@ export class DiscordBot {
         } else if (taskType === "image_generation") {
           workflowResult = await salesWorkflowService.createDraftOptions(workflowInput);
         } else if (taskType === "shopify_product_create") {
-          workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
+          const requestedLinkType = stateManagerService.wantsCheckoutLink(inbound.content) ? "checkout" : "product";
+          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, requestedLinkType);
         } else {
           workflowResult = await salesWorkflowService.answerGeneralQuestion(workflowInput);
         }
