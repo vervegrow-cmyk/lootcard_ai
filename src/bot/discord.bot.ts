@@ -6,7 +6,7 @@ import { orderService } from "../services/order.service";
 import { salesWorkflowService } from "../services/sales-workflow.service";
 import { stateManagerService } from "../services/state-manager.service";
 import { logger } from "../utils/logger";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Prisma } from "@prisma/client";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -46,6 +46,14 @@ function detectLanguage(message: string, fallback: "zh" | "en" = "en"): "zh" | "
 
 function isEchoModeEnabled(): boolean {
   return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
+}
+
+function isOrderSystemInitError(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+    return false;
+  }
+
+  return error.code === "P2021" || error.code === "P2022";
 }
 
 function isOrderQuery(message: string): boolean {
@@ -267,7 +275,11 @@ export class DiscordBot {
         }
       } catch (error) {
         logger.error("Failed to process Discord message", error);
-        finalReply = error instanceof Error ? error.message : "处理请求时发生未知错误。";
+        finalReply = isOrderSystemInitError(error)
+          ? "订单系统初始化失败，请稍后重试。"
+          : error instanceof Error
+            ? error.message
+            : "处理请求时发生未知错误。";
       }
 
       try {

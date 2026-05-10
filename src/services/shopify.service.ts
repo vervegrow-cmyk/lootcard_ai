@@ -66,29 +66,86 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function inferSeoTitle(title: string, tags: string[]): string {
+function inferStyleLabel(tags: string[]): string {
   const normalizedTags = tags.join(" ").toLowerCase();
-  const prefix = normalizedTags.includes("ssr")
-    ? "SSR"
-    : normalizedTags.includes("black-gold") || normalizedTags.includes("黑金")
-      ? "Black Gold"
-      : "Custom";
 
-  return `${prefix} ${title} Trading Card`.replace(/\s+/g, " ").trim();
+  if (normalizedTags.includes("signature") || normalizedTags.includes("signed")) {
+    return "Limited Signature";
+  }
+  if (normalizedTags.includes("black-gold") || normalizedTags.includes("black gold")) {
+    return "Black Gold";
+  }
+  if (normalizedTags.includes("ssr")) {
+    return "SSR";
+  }
+  if (normalizedTags.includes("cyberpunk")) {
+    return "Cyberpunk";
+  }
+  if (normalizedTags.includes("anime")) {
+    return "Anime";
+  }
+
+  return "Custom";
+}
+
+function buildShareHeadline(title: string, tags: string[]): string {
+  const styleLabel = inferStyleLabel(tags);
+  return `${styleLabel} ${title} Trading Card`.replace(/\s+/g, " ").trim();
+}
+
+function buildShareDescription(params: {
+  title: string;
+  descriptionHtml: string;
+  tags: string[];
+  price: number;
+}): string {
+  const baseDescription = stripHtml(params.descriptionHtml);
+  const style = params.tags
+    .filter((tag) => tag && !["discord-order", "custom-card", "lootcard-ai", "lootcard"].includes(tag))
+    .slice(0, 4)
+    .join(", ");
+
+  return `${params.title} by LootCard AI. ${style ? `Style: ${style}. ` : ""}Premium custom trading card ready to order at $${params.price.toFixed(2)}. ${baseDescription}`.trim();
+}
+
+function buildMarketingDescriptionHtml(params: {
+  title: string;
+  descriptionHtml: string;
+  tags: string[];
+  price: number;
+}): string {
+  const shareHeadline = buildShareHeadline(params.title, params.tags);
+  const shareDescription = buildShareDescription(params);
+  const highlights = params.tags
+    .filter((tag) => tag && !["discord-order", "custom-card", "lootcard-ai", "lootcard"].includes(tag))
+    .slice(0, 4)
+    .join(" / ");
+
+  return [
+    params.descriptionHtml,
+    "<hr />",
+    `<h3>${shareHeadline}</h3>`,
+    `<p>${shareDescription}</p>`,
+    highlights ? `<p><strong>Collector Highlights:</strong> ${highlights}</p>` : "",
+    `<p><strong>Price:</strong> $${params.price.toFixed(2)}</p>`,
+    "<p><strong>Production:</strong> Made to order. Production and delivery usually takes about 30 days.</p>",
+    "<p><strong>Share Preview:</strong> This product uses the generated card artwork as its product cover so Discord, WhatsApp, and Facebook shares display the actual card design.</p>"
+  ]
+    .filter(Boolean)
+    .join("");
+}
+
+function inferSeoTitle(title: string, tags: string[]): string {
+  return buildShareHeadline(title, tags);
 }
 
 function inferSeoDescription(params: {
   title: string;
   descriptionHtml: string;
   tags: string[];
+  price: number;
 }): string {
-  const baseDescription = stripHtml(params.descriptionHtml);
-  const style = params.tags
-    .filter((tag) => tag && !["discord-order", "custom-card", "lootcard-ai"].includes(tag))
-    .slice(0, 3)
-    .join(", ");
-
-  return `${params.title} by LootCard AI. ${style ? `Style: ${style}. ` : ""}${baseDescription}`.trim();
+  return buildShareDescription(params);
 }
 
 function discordOrderDescription(input?: string): string {
@@ -161,17 +218,24 @@ export class ShopifyService {
     }
 
     const title = input.title?.trim() || "Custom AI Trading Card";
-    const description = htmlDescription(input.description);
+    const baseDescription = htmlDescription(input.description);
     const price = input.price ?? defaultPrice();
     const tags = input.tags?.length ? input.tags : defaultTags();
     const permanentImageUrl = input.imageUrl
       ? await storageService.ensurePermanentImageUrl(input.imageUrl)
       : undefined;
+    const description = buildMarketingDescriptionHtml({
+      title,
+      descriptionHtml: baseDescription,
+      tags,
+      price
+    });
     const seoTitle = input.seoTitle?.trim() || inferSeoTitle(title, tags);
     const seoDescription = input.seoDescription?.trim() || inferSeoDescription({
       title,
-      descriptionHtml: description,
-      tags
+      descriptionHtml: baseDescription,
+      tags,
+      price
     });
 
     console.log("[SHOPIFY] creating product", {
