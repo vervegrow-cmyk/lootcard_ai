@@ -104,9 +104,8 @@ export class StorageService {
 
     if (isTemporarySiliconFlowUrl(url)) {
       if (!this.isConfigured()) {
-        throw new Error(
-          `Temporary SiliconFlow image URLs cannot be used for Shopify sharing. Configure CDN storage first: ${this.getMissingEnv().join(", ")}`
-        );
+        console.log("[STORAGE] temporary image url used");
+        return url;
       }
       return this.uploadImageFromUrl(url);
     }

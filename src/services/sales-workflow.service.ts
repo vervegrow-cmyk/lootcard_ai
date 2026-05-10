@@ -495,7 +495,9 @@ export class SalesWorkflowService {
       seoDescription: `${draft.selectedOption.title} by LootCard AI. ${draft.selectedOption.description}. 定制商品预计 30 天左右发货。`
     });
 
-    if (!created.ok || !created.productUrl) {
+    const checkoutUrl = created.checkoutUrl || created.productUrl;
+
+    if (!created.ok || !checkoutUrl) {
       return {
         reply: `Shopify 产品创建失败：${created.error || "未知错误"}`,
         stage: "waiting_confirmation",
@@ -514,7 +516,7 @@ export class SalesWorkflowService {
         shopifyVariantId: numericVariantId,
         shopifyVariantGid: created.variantId,
         shopifyProductUrl: created.productUrl,
-        shopifyCheckoutUrl: created.productUrl,
+        shopifyCheckoutUrl: checkoutUrl,
         productTitle: draft.selectedOption.title,
         productDescription: draft.productDescription,
         price: Number(draft.price || draft.selectedOption.estimatedPrice),
@@ -531,14 +533,14 @@ export class SalesWorkflowService {
         currentPrompt: draft.selectedOption.prompt,
         finalDesignSummary: draft.selectedOption.style,
         shopifyProductId: created.productId,
-        shopifyProductUrl: created.productUrl
+        shopifyProductUrl: checkoutUrl
       });
       if (created.productId) {
         await memoryService.logShopifyProduct({
           projectId: input.project.projectId,
           discordUserId: input.discordUserId,
           shopifyProductId: created.productId,
-          shopifyProductUrl: created.productUrl,
+          shopifyProductUrl: checkoutUrl,
           title: draft.selectedOption.title,
           price: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
           sku: created.variantId || `DISCORD-${Date.now()}`
@@ -553,7 +555,7 @@ export class SalesWorkflowService {
         `订单号：${draft.orderNo || "-"}`,
         `商品：${draft.selectedOption.title}`,
         `价格：$${Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2)}`,
-        `下单链接：${created.productUrl}`,
+        `下单链接：${checkoutUrl}`,
         "",
         "点击即可付款。"
       ].join("\n"),
@@ -562,16 +564,16 @@ export class SalesWorkflowService {
         stage: "payment_stage",
         currentStage: "payment_stage",
         latestShopifyProductId: created.productId || "",
-        latestShopifyProductUrl: created.productUrl,
+        latestShopifyProductUrl: checkoutUrl,
         latestProductTitle: draft.selectedOption.title,
         latestProductDescription: draft.productDescription,
         latestPrice: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
         currentOrderDraft: {
           ...draft,
           stage: "shopify_created",
-          shopifyProductUrl: created.productUrl
+          shopifyProductUrl: checkoutUrl
         },
-        shopifyProductUrl: created.productUrl
+        shopifyProductUrl: checkoutUrl
       }
     };
   }

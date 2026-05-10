@@ -25,6 +25,7 @@ export interface CreateShopifyProductOutput {
   variantId?: string;
   handle?: string;
   productUrl?: string;
+  checkoutUrl?: string;
   adminUrl?: string;
   price?: number;
   title?: string;
@@ -217,6 +218,14 @@ export class ShopifyService {
       };
     }
 
+    if (!input.imageUrl?.trim()) {
+      return {
+        ok: false,
+        shop: shopRecord.shop,
+        error: "缺少卡牌图，请先生成图片"
+      };
+    }
+
     const title = input.title?.trim() || "Custom AI Trading Card";
     const baseDescription = htmlDescription(input.description);
     const price = input.price ?? defaultPrice();
@@ -224,6 +233,7 @@ export class ShopifyService {
     const permanentImageUrl = input.imageUrl
       ? await storageService.ensurePermanentImageUrl(input.imageUrl)
       : undefined;
+    const finalImageUrl = permanentImageUrl || input.imageUrl.trim();
     const description = buildMarketingDescriptionHtml({
       title,
       descriptionHtml: baseDescription,
@@ -243,7 +253,7 @@ export class ShopifyService {
       title,
       price,
       tags,
-      permanentImageUrl
+      permanentImageUrl: finalImageUrl
     });
 
     try {
@@ -258,7 +268,7 @@ export class ShopifyService {
         vendor: input.vendor,
         productType: input.productType,
         sku: input.sku,
-        imageUrl: permanentImageUrl,
+        imageUrl: finalImageUrl,
         seoTitle,
         seoDescription,
         shippingType: input.shippingType,
@@ -276,6 +286,12 @@ export class ShopifyService {
       }
       if (created.productUrl) {
         console.log("[Shopify Product URL]", created.productUrl);
+      }
+      if (created.variantId) {
+        console.log(`[SHOPIFY] variantId=${created.variantId}`);
+      }
+      if (created.price !== undefined) {
+        console.log(`[SHOPIFY] variant price set price=${created.price.toFixed(2)}`);
       }
       console.log("[SHOPIFY] product created", created);
       console.log("[Shopify Product Create Result]", created);
