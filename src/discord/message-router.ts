@@ -1,0 +1,125 @@
+import { AiRouteResult } from "../services/ai-router.service";
+import { CurrentOrderDraft, FlowMode } from "../types";
+
+export type FlowAction =
+  | "confirm"
+  | "modify"
+  | "regenerate"
+  | "select_option"
+  | "checkout_link"
+  | "product_link"
+  | "stay_in_flow"
+  | "start_ai_card_order"
+  | "pass_through";
+
+export interface FlowRouteResult {
+  flowMode: FlowMode;
+  action: FlowAction;
+  selectedOption?: "A" | "B" | "C";
+  handledByFlow: boolean;
+}
+
+function hasAny(text: string, keywords: string[]): boolean {
+  return keywords.some((keyword) => text.includes(keyword));
+}
+
+function isConfirmation(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    normalized === "1" ||
+    hasAny(normalized, ["ok", "yes", "confirm", "确认", "下单", "buy", "checkout", "order"])
+  );
+}
+
+function isModification(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return (
+    normalized === "2" ||
+    hasAny(normalized, ["modify", "edit", "修改", "改一下", "换颜色", "更暗黑", "加金边", "再高级一点"])
+  );
+}
+
+function isRegenerate(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return normalized === "3" || hasAny(normalized, ["retry", "again", "regenerate", "重新生成"]);
+}
+
+function isCheckoutLink(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return hasAny(normalized, ["付款链接", "结账链接", "checkout", "cart", "直接付款", "payment link"]);
+}
+
+function isProductLink(text: string): boolean {
+  const normalized = text.trim().toLowerCase();
+  return hasAny(normalized, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接"]);
+}
+
+function detectSelection(text: string, draft?: CurrentOrderDraft | null): "A" | "B" | "C" | null {
+  if (!draft || draft.stage !== "draft_options") {
+    return null;
+  }
+
+  const normalized = text.trim().toUpperCase();
+  if (normalized === "A" || normalized === "B" || normalized === "C") {
+    return normalized;
+  }
+
+  return null;
+}
+
+export class MessageRouter {
+  route(params: {
+    message: string;
+    flowMode: FlowMode;
+    draft?: CurrentOrderDraft | null;
+    aiRoute: AiRouteResult;
+  }): FlowRouteResult {
+    const { message, flowMode, draft, aiRoute } = params;
+    const selected = detectSelection(message, draft);
+
+    if (flowMode === "AI_CARD_ORDER" || flowMode === "SHOPIFY_CHECKOUT") {
+      if (selected) {
+        return {
+          flowMode,
+          action: "select_option",
+          selectedOption: selected,
+          handledByFlow: true
+        };
+      }
+
+      if (isCheckoutLink(message)) {
+        return { flowMode, action: "checkout_link", handledByFlow: true };
+      }
+
+      if (isProductLink(message) || isConfirmation(message)) {
+        return { flowMode, action: "confirm", handledByFlow: true };
+      }
+
+      if (isModification(message)) {
+        return { flowMode, action: "modify", handledByFlow: true };
+      }
+
+      if (isRegenerate(message)) {
+        return { flowMode, action: "regenerate", handledByFlow: true };
+      }
+
+      return { flowMode, action: "stay_in_flow", handledByFlow: true };
+    }
+
+    if (aiRoute.taskType === "image_generation") {
+      return {
+        flowMode: "AI_CARD_ORDER",
+        action: "start_ai_card_order",
+        handledByFlow: true
+      };
+    }
+
+    return {
+      flowMode,
+      action: "pass_through",
+      handledByFlow: false
+    };
+  }
+}
+
+export const messageRouter = new MessageRouter();

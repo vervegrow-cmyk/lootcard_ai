@@ -1,5 +1,7 @@
 import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
 import { designAgent } from "../agents/design.agent";
+import { messageRouter } from "../discord/message-router";
+import { sessionService } from "../discord/session.service";
 import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
 import { aiRouterService } from "../services/ai-router.service";
 import { memoryService } from "../services/memory.service";
@@ -190,6 +192,13 @@ export class DiscordBot {
           (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
         const aiRoute = aiRouterService.detectRoute(inbound.content);
         const taskType = aiRoute.taskType;
+        const flowMode = sessionService.resolveFlowMode(snapshot.memory, restoredDraft);
+        const flowRoute = messageRouter.route({
+          message: inbound.content,
+          flowMode,
+          draft: restoredDraft,
+          aiRoute
+        });
 
         console.log("[AGENT] route start");
         const plan = hermesOrchestratorAgent.plan({
@@ -219,6 +228,7 @@ export class DiscordBot {
         });
 
         console.log(`[AI ROUTER] taskType=${taskType}`);
+        console.log(`[SESSION] flowMode=${flowMode}`);
 
         const workflowInput = {
           discordUserId: inbound.discordUserId,
@@ -237,24 +247,43 @@ export class DiscordBot {
         const draft = restoredDraft;
         console.log(`[ORDER_FLOW] stage=${draft?.stage || snapshot.memory.currentStage || "idle"}`);
 
-        const selectedDraftOption = stateManagerService.detectDraftSelection(inbound.content, draft);
-
         if (isOrderQuery(inbound.content)) {
           finalReply = await formatRecentOrders(inbound.discordUserId);
           workflowResult = null;
-        } else if (stateManagerService.wantsCheckoutLink(inbound.content) && stateManagerService.canCreateShopifyFromDraft(draft)) {
-          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "checkout");
-        } else if (
-          (stateManagerService.isPurchaseConfirmation(inbound.content) || stateManagerService.wantsProductLink(inbound.content)) &&
-          stateManagerService.canCreateShopifyFromDraft(draft)
-        ) {
-          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "product");
-        } else if (selectedDraftOption) {
-          workflowResult = await salesWorkflowService.generateImageForSelectedOption(workflowInput, selectedDraftOption);
-        } else if (stateManagerService.wantsModification(inbound.content) && draft) {
-          workflowResult = await salesWorkflowService.modifyCurrentDesign(workflowInput);
-        } else if (stateManagerService.wantsMoreOptions(inbound.content) && draft) {
-          workflowResult = await salesWorkflowService.regenerateOptions(workflowInput);
+        } else if (flowRoute.handledByFlow) {
+          switch (flowRoute.action) {
+            case "checkout_link":
+              workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "checkout");
+              break;
+            case "confirm":
+            case "product_link":
+              workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "product");
+              break;
+            case "select_option":
+              workflowResult = flowRoute.selectedOption
+                ? await salesWorkflowService.generateImageForSelectedOption(workflowInput, flowRoute.selectedOption)
+                : null;
+              break;
+            case "modify":
+              workflowResult = await salesWorkflowService.modifyCurrentDesign(workflowInput);
+              break;
+            case "regenerate":
+            case "start_ai_card_order":
+              workflowResult = draft
+                ? await salesWorkflowService.regenerateOptions(workflowInput)
+                : await salesWorkflowService.createDraftOptions(workflowInput);
+              break;
+            case "stay_in_flow":
+              finalReply =
+                flowMode === "SHOPIFY_CHECKOUT"
+                  ? "当前正在下单流程中。你可以回复“产品链接”查看商品页，或回复“付款链接”直接进入付款。"
+                  : "当前正在 AI 卡牌定制流程中。请回复 A/B/C 选择方案，或回复 1 确认下单、2 修改设计、3 重新生成。";
+              workflowResult = null;
+              break;
+            default:
+              workflowResult = null;
+              break;
+          }
         } else if (taskType === "image_generation" && !draft) {
           const skillMemory = {
             ...((snapshot.memory as unknown) as Record<string, unknown>),
@@ -286,8 +315,6 @@ export class DiscordBot {
           });
 
           workflowResult = null;
-        } else if (taskType === "image_generation") {
-          workflowResult = await salesWorkflowService.createDraftOptions(workflowInput);
         } else if (taskType === "shopify_product_create") {
           const requestedLinkType = stateManagerService.wantsCheckoutLink(inbound.content) ? "checkout" : "product";
           workflowResult = await salesWorkflowService.createOrderLink(workflowInput, requestedLinkType);

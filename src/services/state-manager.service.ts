@@ -19,7 +19,19 @@ export class StateManagerService {
     const text = message.trim().toLowerCase();
     return (
       text === "1" ||
-      hasAny(text, ["生成下单链接", "确认并生成下单链接", "确认", "下单", "我要购买", "buy", "order"])
+      hasAny(text, [
+        "生成下单链接",
+        "确认并生成下单链接",
+        "确认",
+        "下单",
+        "我要购买",
+        "buy",
+        "order",
+        "ok",
+        "yes",
+        "confirm",
+        "checkout"
+      ])
     );
   }
 
@@ -42,14 +54,16 @@ export class StateManagerService {
         "更暗",
         "cyberpunk",
         "revise",
-        "change"
+        "change",
+        "modify",
+        "edit"
       ])
     );
   }
 
   wantsMoreOptions(message: string): boolean {
     const text = message.toLowerCase();
-    return text.trim() === "3" || hasAny(text, ["再生成几个方案", "多几个方案", "再来几个", "more options", "more versions"]);
+    return text.trim() === "3" || hasAny(text, ["再生成几个方案", "多几个方案", "再来几个", "more options", "more versions", "retry", "again", "regenerate", "重新生成"]);
   }
 
   detectDraftSelection(message: string, draft?: CurrentOrderDraft | null): "A" | "B" | "C" | null {

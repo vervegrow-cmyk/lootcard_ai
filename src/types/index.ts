@@ -18,6 +18,7 @@ export type ProjectStage =
 export type LanguagePreference = "zh" | "en";
 
 export type ShippingType = "digital_download" | "physical_card_us" | "physical_card_cn";
+export type FlowMode = "IDLE" | "AI_CARD_ORDER" | "RANDOM_DEMO" | "SHOPIFY_CHECKOUT";
 
 export type HermesIntent =
   | "answer_question"
@@ -154,6 +155,7 @@ export interface PromptPolishResult {
 }
 
 export interface HermesMemory {
+  flowMode?: FlowMode;
   language: LanguagePreference;
   stage: ProjectStage;
   currentStage: ProjectStage;
@@ -227,6 +229,7 @@ export const EMPTY_REQUIREMENTS: CardRequirements = {
 };
 
 export const EMPTY_HERMES_MEMORY: HermesMemory = {
+  flowMode: "IDLE",
   language: "en",
   stage: "idle",
   currentStage: "idle",

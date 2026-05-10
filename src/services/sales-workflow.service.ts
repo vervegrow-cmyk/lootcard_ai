@@ -222,6 +222,7 @@ export class SalesWorkflowService {
       ].join("\n"),
       stage: "draft_design",
       memoryPatch: {
+        flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
         latestPrompt: options[0].prompt,
@@ -281,6 +282,7 @@ export class SalesWorkflowService {
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
+        flowMode: "AI_CARD_ORDER",
         stage: "waiting_confirmation",
         currentStage: "waiting_confirmation",
         selectedOption: selectedOption.id,
@@ -365,6 +367,7 @@ export class SalesWorkflowService {
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
+        flowMode: "AI_CARD_ORDER",
         stage: "waiting_confirmation",
         currentStage: "waiting_confirmation",
         currentPrompt: revisedPrompt,
@@ -435,6 +438,7 @@ export class SalesWorkflowService {
       ].join("\n"),
       stage: "draft_design",
       memoryPatch: {
+        flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
         currentOrderDraft: {
@@ -573,6 +577,7 @@ export class SalesWorkflowService {
       ].join("\n"),
       stage: "payment_stage",
       memoryPatch: {
+        flowMode: "SHOPIFY_CHECKOUT",
         stage: "payment_stage",
         currentStage: "payment_stage",
         latestShopifyProductId: created.productId || "",
