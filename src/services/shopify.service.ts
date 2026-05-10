@@ -160,6 +160,213 @@ function discordOrderDescription(input?: string): string {
   );
 }
 
+function asNumericId(value?: string): string {
+  return value?.split("/").pop() || "";
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function postShopifyGraphql<TData>(params: {
+  shop: string;
+  accessToken: string;
+  apiVersion: string;
+  query: string;
+  variables?: Record<string, unknown>;
+}): Promise<{ ok: boolean; data?: TData; text: string; status: number }> {
+  const response = await fetch(`https://${params.shop}/admin/api/${params.apiVersion}/graphql.json`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": params.accessToken
+    },
+    body: JSON.stringify({
+      query: params.query,
+      variables: params.variables || {}
+    })
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    return { ok: false, text, status: response.status };
+  }
+
+  return {
+    ok: true,
+    text,
+    status: response.status,
+    data: JSON.parse(text) as TData
+  };
+}
+
+async function verifyProductImageState(params: {
+  shop: string;
+  accessToken: string;
+  apiVersion: string;
+  productId: string;
+}): Promise<{ ok: boolean; mediaReady: boolean; featuredReady: boolean }> {
+  const query = `
+    query VerifyProductImage($id: ID!) {
+      product(id: $id) {
+        id
+        featuredMedia {
+          ... on MediaImage {
+            id
+            preview {
+              image {
+                url
+              }
+            }
+          }
+        }
+        media(first: 10) {
+          nodes {
+            ... on MediaImage {
+              id
+              preview {
+                image {
+                  url
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await postShopifyGraphql<{
+    data?: {
+      product?: {
+        featuredMedia?: {
+          preview?: {
+            image?: {
+              url?: string | null;
+            } | null;
+          } | null;
+        } | null;
+        media?: {
+          nodes?: Array<{
+            preview?: {
+              image?: {
+                url?: string | null;
+              } | null;
+            } | null;
+          }>;
+        };
+      } | null;
+    };
+  }>({
+    shop: params.shop,
+    accessToken: params.accessToken,
+    apiVersion: params.apiVersion,
+    query,
+    variables: { id: params.productId }
+  });
+
+  if (!response.ok || !response.data) {
+    return { ok: false, mediaReady: false, featuredReady: false };
+  }
+
+  const product = response.data.data?.product;
+  const featuredReady = Boolean(product?.featuredMedia?.preview?.image?.url);
+  const mediaReady = Boolean(product?.media?.nodes?.some((node) => node.preview?.image?.url));
+
+  return { ok: true, mediaReady, featuredReady };
+}
+
+async function uploadRestProductImage(params: {
+  shop: string;
+  accessToken: string;
+  apiVersion: string;
+  productId: string;
+  imageUrl: string;
+  altText: string;
+}): Promise<{ ok: boolean; imageId?: string; error?: string }> {
+  const numericProductId = asNumericId(params.productId);
+  if (!numericProductId) {
+    return {
+      ok: false,
+      error: "Missing numeric Shopify product id for REST image upload."
+    };
+  }
+
+  console.log("[SHOPIFY IMAGE] fallback REST image upload start");
+  const response = await fetch(
+    `https://${params.shop}/admin/api/${params.apiVersion}/products/${numericProductId}/images.json`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": params.accessToken
+      },
+      body: JSON.stringify({
+        image: {
+          src: params.imageUrl,
+          alt: params.altText,
+          position: 1
+        }
+      })
+    }
+  );
+
+  const text = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `Shopify REST image upload failed: ${response.status} ${text}`
+    };
+  }
+
+  const parsed = JSON.parse(text) as { image?: { id?: number | string } };
+  const imageId = parsed.image?.id ? String(parsed.image.id) : "";
+  console.log(`[SHOPIFY IMAGE] fallback REST image upload success imageId=${imageId}`);
+  return { ok: true, imageId };
+}
+
+async function ensureProductImageReady(params: {
+  shop: string;
+  accessToken: string;
+  apiVersion: string;
+  productId: string;
+  imageUrl: string;
+  altText: string;
+}): Promise<{ ok: boolean; warning?: string; error?: string }> {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await sleep(2000);
+    console.log(`[SHOPIFY IMAGE] featuredMedia retry=${attempt}`);
+    const state = await verifyProductImageState(params);
+    if (state.ok && state.mediaReady) {
+      console.log("[SHOPIFY IMAGE] product image verified");
+      return {
+        ok: true,
+        warning: state.featuredReady ? undefined : "[SHOPIFY] media uploaded but featuredMedia not ready yet"
+      };
+    }
+  }
+
+  const restUpload = await uploadRestProductImage(params);
+  if (!restUpload.ok) {
+    return { ok: false, error: restUpload.error };
+  }
+
+  await sleep(2000);
+  const finalState = await verifyProductImageState(params);
+  if (finalState.ok && finalState.mediaReady) {
+    console.log("[SHOPIFY IMAGE] product image verified");
+    return {
+      ok: true,
+      warning: finalState.featuredReady ? undefined : "[SHOPIFY] media uploaded but featuredMedia not ready yet"
+    };
+  }
+
+  return {
+    ok: false,
+    error: "Shopify product image verification failed after REST fallback."
+  };
+}
+
 function shouldUseRestFallback(error?: string): boolean {
   const message = (error || "").toLowerCase();
   return (
@@ -315,6 +522,29 @@ export class ShopifyService {
           inventoryQuantity: input.inventoryQuantity
         });
 
+        if (restCreated.ok && restCreated.productId) {
+          const imageResult = await ensureProductImageReady({
+            shop: shopRecord.shop,
+            accessToken: tokenContext.accessToken,
+            apiVersion: shopifyApiVersion(),
+            productId: restCreated.productId,
+            imageUrl: finalImageUrl,
+            altText: title
+          });
+
+          if (!imageResult.ok) {
+            return {
+              ok: false,
+              shop: shopRecord.shop,
+              error: imageResult.error
+            };
+          }
+
+          if (imageResult.warning) {
+            console.log(imageResult.warning);
+          }
+        }
+
         if (restCreated.productUrl) {
           console.log("[Shopify Product URL]", restCreated.productUrl);
         }
@@ -324,6 +554,29 @@ export class ShopifyService {
           ...restCreated,
           shop: shopRecord.shop
         };
+      }
+
+      if (created.ok && created.productId) {
+        const imageResult = await ensureProductImageReady({
+          shop: shopRecord.shop,
+          accessToken: tokenContext.accessToken,
+          apiVersion: shopifyApiVersion(),
+          productId: created.productId,
+          imageUrl: finalImageUrl,
+          altText: title
+        });
+
+        if (!imageResult.ok) {
+          return {
+            ok: false,
+            shop: shopRecord.shop,
+            error: imageResult.error
+          };
+        }
+
+        if (imageResult.warning) {
+          console.log(imageResult.warning);
+        }
       }
 
       if (created.productUrl) {
