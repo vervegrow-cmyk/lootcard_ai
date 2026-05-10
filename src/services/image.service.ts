@@ -4,8 +4,16 @@ function env(name: string): string {
   return process.env[name]?.trim() || "";
 }
 
-function imageConfigError(): Error {
-  return new Error("图片生成模型还没配置，请先配置 IMAGE_PROVIDER 和对应 API KEY。");
+interface SiliconFlowImageResponse {
+  images?: Array<{
+    url?: string;
+    b64_json?: string;
+  }>;
+}
+
+interface SiliconFlowErrorResponse {
+  code?: number;
+  message?: string;
 }
 
 export class ImageService {
@@ -13,55 +21,101 @@ export class ImageService {
     return env("IMAGE_PROVIDER").toLowerCase();
   }
 
-  private ensureConfigured(): {
-    provider: string;
-    model: string;
-    apiKey?: string;
-    accessKey?: string;
-    secretKey?: string;
-  } {
+  async generateImage(prompt: string): Promise<{
+    ok: boolean;
+    imageUrl?: string;
+    imageBase64?: string;
+    error?: string;
+  }> {
     const provider = this.getProvider();
     console.log(`[IMAGE] provider=${provider || "unconfigured"}`);
 
-    if (!provider) {
-      throw imageConfigError();
+    if (provider !== "siliconflow") {
+      const error = "Unsupported image provider";
+      console.log(`[IMAGE] failed error=${error}`);
+      return { ok: false, error };
     }
 
-    if (provider === "kling") {
-      const apiKey = env("KLING_API_KEY");
-      const accessKey = env("KLING_ACCESS_KEY");
-      const secretKey = env("KLING_SECRET_KEY");
-      const model = env("KLING_IMAGE_MODEL") || "kling-v1";
-
-      if (!apiKey && !(accessKey && secretKey)) {
-        throw imageConfigError();
-      }
-
-      return {
-        provider,
-        model,
-        apiKey,
-        accessKey,
-        secretKey
-      };
+    const apiKey = env("SILICONFLOW_API_KEY");
+    if (!apiKey) {
+      const error = "Missing SILICONFLOW_API_KEY";
+      console.log(`[IMAGE] failed error=${error}`);
+      return { ok: false, error };
     }
 
-    throw new Error(`Unsupported IMAGE_PROVIDER: ${provider}`);
-  }
-
-  async generateImage(prompt: string): Promise<{ imageUrl: string; prompt: string; summary: string }> {
-    const config = this.ensureConfigured();
-    console.log("[IMAGE] generating", { provider: config.provider, model: config.model });
+    const model = env("IMAGE_MODEL") || "black-forest-labs/FLUX.1-dev";
+    const fallbackModel = env("IMAGE_FALLBACK_MODEL") || "Kwai-Kolors/Kolors";
+    console.log(`[IMAGE] model=${model}`);
+    console.log("[IMAGE] generating");
 
     try {
-      if (config.provider === "kling") {
-        throw new Error(`Kling provider is configured with model ${config.model}, but live image generation is not implemented yet.`);
+      const attempt = async (targetModel: string) => {
+        const response = await fetch("https://api.siliconflow.cn/v1/images/generations", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            prompt,
+            image_size: "768x1024",
+            batch_size: 1
+          })
+        });
+
+        const text = await response.text();
+        return { response, text, model: targetModel };
+      };
+
+      let attemptResult = await attempt(model);
+      let parsedError: SiliconFlowErrorResponse | null = null;
+      try {
+        parsedError = JSON.parse(attemptResult.text) as SiliconFlowErrorResponse;
+      } catch {
+        parsedError = null;
       }
 
-      throw new Error(`Unsupported IMAGE_PROVIDER: ${config.provider}`);
+      if (
+        !attemptResult.response.ok &&
+        fallbackModel &&
+        fallbackModel !== model &&
+        (parsedError?.code === 30003 || /Model disabled/i.test(attemptResult.text))
+      ) {
+        console.log(`[IMAGE] model fallback=${fallbackModel}`);
+        attemptResult = await attempt(fallbackModel);
+      }
+
+      if (!attemptResult.response.ok) {
+        const error = `SiliconFlow request failed: ${attemptResult.response.status} ${attemptResult.text}`;
+        console.log(`[IMAGE] failed error=${error}`);
+        return { ok: false, error };
+      }
+
+      const parsed = JSON.parse(attemptResult.text) as SiliconFlowImageResponse;
+      const first = parsed.images?.[0];
+      const imageUrl = first?.url?.trim();
+      const imageBase64 = first?.b64_json?.trim();
+
+      if (!imageUrl && !imageBase64) {
+        const error = "SiliconFlow returned no image URL or base64 data.";
+        console.log(`[IMAGE] failed error=${error}`);
+        return { ok: false, error };
+      }
+
+      console.log(`[IMAGE] success imageUrl=${imageUrl || "base64-only"}`);
+      return {
+        ok: true,
+        imageUrl,
+        imageBase64
+      };
     } catch (error) {
-      console.log("[IMAGE] failed", error instanceof Error ? error.message : String(error));
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.log(`[IMAGE] failed error=${message}`);
+      return {
+        ok: false,
+        error: message
+      };
     }
   }
 
@@ -77,27 +131,26 @@ export class ImageService {
   ): Promise<ImageOption[]> {
     const normalized =
       typeof input === "string"
-        ? {
-            prompt: input,
-            count: legacyCount ?? 3,
-            size: "1024x1024"
-          }
+        ? { prompt: input, count: legacyCount ?? 1, size: "768x1024" }
         : input;
 
-    const count = normalized.count ?? 3;
+    const count = normalized.count ?? 1;
     const items: ImageOption[] = [];
 
     for (let index = 0; index < count; index += 1) {
       const generated = await this.generateImage(normalized.prompt);
+      if (!generated.ok) {
+        throw new Error(generated.error || "Image generation failed.");
+      }
+
       items.push({
         id: String.fromCharCode(65 + index),
         title: `Generated Image ${index + 1}`,
-        imageUrl: generated.imageUrl,
-        prompt: generated.prompt
+        imageUrl: generated.imageUrl || "",
+        prompt: normalized.prompt
       });
     }
 
-    console.log("[IMAGE] success", { count: items.length });
     return items;
   }
 
@@ -106,9 +159,16 @@ export class ImageService {
     prompt: string;
     revisionText: string;
   }): Promise<{ imageUrl: string; prompt: string; summary: string }> {
-    const config = this.ensureConfigured();
-    console.log("[IMAGE] generating", { provider: config.provider, model: config.model, revision: true });
-    throw new Error(`Image revision is not implemented for provider ${config.provider}.`);
+    const generated = await this.generateImage(`${input.prompt}. Revision request: ${input.revisionText}`);
+    if (!generated.ok) {
+      throw new Error(generated.error || "Image revision failed.");
+    }
+
+    return {
+      imageUrl: generated.imageUrl || "",
+      prompt: `${input.prompt}. Revision request: ${input.revisionText}`,
+      summary: `Revision applied: ${input.revisionText}`
+    };
   }
 
   async generateCardImages(input: {
@@ -117,8 +177,12 @@ export class ImageService {
     projectId: string;
   }): Promise<{ imageUrl: string }> {
     const generated = await this.generateImage(`${input.imagePrompt}, ${input.styleName}`);
+    if (!generated.ok) {
+      throw new Error(generated.error || "Image generation failed.");
+    }
+
     return {
-      imageUrl: generated.imageUrl
+      imageUrl: generated.imageUrl || ""
     };
   }
 }

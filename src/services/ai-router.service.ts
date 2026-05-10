@@ -14,7 +14,7 @@ function cleanTitle(value: string): string {
   return value
     .replace(/\s*的?\s*shopify.*$/i, "")
     .replace(/\s*的?\s*(商品|产品|链接).*$/i, "")
-    .replace(/\s*(价格|price)\s*[:：=].*$/i, "")
+    .replace(/\s*(价格|price)\s*[:：=]?\s*.*$/i, "")
     .trim();
 }
 
@@ -31,7 +31,9 @@ export class AiRouterService {
         "main image",
         "packaging image"
       ]) ||
-      /生成图片|做个图|做图|生成图|出图|画图|设计图|帮我做个图|卡牌图|海报|logo|主图|包装图/.test(message)
+      /生成图片|做个图|做图|生成图|出图|画图|设计图|帮我做个图|预览图|卡牌图|海报|logo|主图|包装图/.test(
+        message
+      )
     ) {
       console.log("[AI ROUTER] matched image_generation");
       return "image_generation";
@@ -46,7 +48,9 @@ export class AiRouterService {
         "create product",
         "create item"
       ]) ||
-      /Shopify链接|shopify链接|产品链接|商品链接|下单链接|购买链接|支付链接|付款链接|创建商品|创建产品/.test(message)
+      /Shopify链接|shopify链接|产品链接|商品链接|下单链接|购买链接|支付链接|付款链接|创建商品|创建产品/.test(
+        message
+      )
     ) {
       return "shopify_product_create";
     }
@@ -69,7 +73,7 @@ export class AiRouterService {
       trimmed.match(/create\s+(?:a\s+)?product\s+(?:named|called)\s*["']?([^"']+?)["']?$/i);
 
     const priceMatch =
-      trimmed.match(/价格\s*[:：]?\s*(\d+(?:\.\d{1,2})?)/i) ||
+      trimmed.match(/价格\s*[:：=]?\s*(\d+(?:\.\d{1,2})?)/i) ||
       trimmed.match(/price\s*[:=]?\s*(\d+(?:\.\d{1,2})?)/i);
 
     const rawTitle = cnMatch?.[1] || enMatch?.[1] || "";

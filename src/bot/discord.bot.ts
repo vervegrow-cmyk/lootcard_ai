@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
 import { aiRouterService } from "../services/ai-router.service";
 import { imageService } from "../services/image.service";
 import { memoryService } from "../services/memory.service";
@@ -45,10 +45,6 @@ function detectLanguage(message: string, fallback: "zh" | "en" = "en"): "zh" | "
 function formatCurrency(value?: number): string {
   const amount = Number(value ?? process.env.DEFAULT_CARD_PRICE ?? "29.99");
   return Number.isFinite(amount) ? amount.toFixed(2) : "29.99";
-}
-
-function formatImageReply(item: { imageUrl: string; prompt: string; summary: string }): string {
-  return [`图片：${item.imageUrl}`, `提示词：${item.prompt}`, `说明：${item.summary}`].join("\n");
 }
 
 function formatShopifyReply(params: {
@@ -131,6 +127,7 @@ export class DiscordBot {
       }
 
       let finalReply = "";
+      let attachment: AttachmentBuilder | null = null;
 
       try {
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
@@ -138,8 +135,19 @@ export class DiscordBot {
         console.log(`[AI ROUTER] taskType=${taskType}`);
 
         if (taskType === "image_generation") {
-          const image = await imageService.generateImage(inbound.content);
-          finalReply = formatImageReply(image);
+          const generated = await imageService.generateImage(inbound.content);
+          if (!generated.ok) {
+            finalReply = `图片生成失败：${generated.error || "未知错误"}`;
+          } else if (generated.imageBase64) {
+            attachment = new AttachmentBuilder(Buffer.from(generated.imageBase64, "base64"), {
+              name: "siliconflow-image.png"
+            });
+            finalReply = "图片已生成，已附上真实图片。";
+          } else if (generated.imageUrl) {
+            finalReply = `图片已生成：${generated.imageUrl}`;
+          } else {
+            finalReply = "图片生成失败：SiliconFlow 未返回可用图片。";
+          }
         } else if (taskType === "shopify_product_create") {
           const request = aiRouterService.extractShopifyProductRequest(inbound.content);
           const created = await shopifyService.createShopifyProductFromDiscord({
@@ -176,7 +184,14 @@ export class DiscordBot {
       }
 
       try {
-        await message.reply(finalReply);
+        if (attachment) {
+          await message.reply({
+            content: finalReply,
+            files: [attachment]
+          });
+        } else {
+          await message.reply(finalReply);
+        }
       } catch (error) {
         logger.error("Failed to send Discord reply", error);
       }
