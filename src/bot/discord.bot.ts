@@ -186,6 +186,7 @@ export class DiscordBot {
 
       const language = detectLanguage(inbound.content);
       console.log("[DISCORD] incoming message", inbound.content);
+      console.log(`[LANGUAGE] detected=${language}`);
 
       if (isEchoModeEnabled()) {
         await message.reply(`Echo: ${inbound.content}`);

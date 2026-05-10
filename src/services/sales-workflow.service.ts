@@ -2,17 +2,17 @@ import {
   ConversationEntry,
   CurrentOrderDraft,
   HermesMemory,
+  LanguagePreference,
   OrderDraftOption,
   ProjectContext,
   ProjectStage,
-  ShippingType,
-  LanguagePreference
+  ShippingType
 } from "../types";
+import { buildConceptOptions } from "../templates/card-concepts";
 import { imageService } from "./image.service";
 import { memoryService } from "./memory.service";
 import { openRouterService } from "./openrouter.service";
 import { orderService } from "./order.service";
-import { pricingService } from "./pricing.service";
 import { stateManagerService } from "./state-manager.service";
 import { shopifyService } from "./shopify.service";
 
@@ -44,96 +44,41 @@ function t(language: LanguagePreference, zh: string, en: string): string {
   return language === "zh" ? zh : en;
 }
 
-function inferStyle(message: string, memory: HermesMemory): string {
-  const text = `${memory.latestDesignStyle} ${message}`.toLowerCase();
+function inferCraft(style: string, language: LanguagePreference): string {
+  const lower = style.toLowerCase();
 
-  if (/(黑金|black gold)/.test(text) && /ssr/.test(text)) {
-    return "黑金SSR";
+  if (/black gold|黑金|ssr/.test(lower)) {
+    return language === "zh" ? "烫金 / 全息 / 动漫角色" : "Foil / Holographic / Anime Character";
   }
-  if (/(赛博朋克|cyberpunk)/.test(text)) {
-    return "赛博朋克";
+  if (/cyberpunk|赛博/.test(lower)) {
+    return language === "zh" ? "霓虹 / 机甲 / 战斗感" : "Neon / Mecha / Combat";
   }
-  if (/(签名|signed|signature)/.test(text)) {
-    return "高级收藏签名卡";
+  if (/signature|signed|签名|limited/.test(lower)) {
+    return language === "zh" ? "限量 / 签名 / 收藏级" : "Limited / Signed / Collector Grade";
   }
-
-  return memory.latestDesignStyle || "动漫卡牌";
+  return language === "zh" ? "全息 / 收藏卡工艺" : "Holographic / Collector Card Finish";
 }
 
-function inferCraft(style: string): string {
-  if (/黑金|SSR/.test(style)) {
-    return "烫金 / 全息 / 动漫角色";
+function buildDescription(option: OrderDraftOption, originalMessage: string, language: LanguagePreference): string {
+  if (language === "zh") {
+    return [
+      `<p><strong>${option.title}</strong></p>`,
+      `<p>风格：${option.style}</p>`,
+      `<p>工艺：${inferCraft(option.style, language)}</p>`,
+      `<p>用户需求：${originalMessage}</p>`,
+      "<p>发货说明：定制商品预计 30 天左右制作并发货。</p>",
+      "<p>定制说明：最终成品将按照当前确认方案生产。</p>"
+    ].join("");
   }
-  if (/赛博朋克/.test(style)) {
-    return "霓虹 / 机甲 / 战斗感";
-  }
-  if (/签名/.test(style)) {
-    return "限量 / 签名 / 收藏级";
-  }
-  return "全息 / 收藏卡工艺";
-}
 
-function buildCommercialPrompt(baseRequest: string, style: string): string {
-  const stylePromptMap: Record<string, string> = {
-    黑金SSR:
-      "black gold SSR anime trading card, premium foil frame, holographic shine, luxury collectible card, cinematic lighting",
-    赛博朋克:
-      "cyberpunk anime trading card, neon edges, battle posture, futuristic metallic frame, premium collectible composition",
-    高级收藏签名卡:
-      "limited signature anime trading card, premium collector edition, elegant embossing, luxury finish, showcase composition",
-    动漫卡牌:
-      "anime trading card, premium collectible frame, vertical composition, glossy hero card, high detail"
-  };
-
-  const stylePrompt = stylePromptMap[style] || stylePromptMap["动漫卡牌"];
-  return `${stylePrompt}, user request: ${baseRequest}`.replace(/\s+/g, " ").trim();
-}
-
-function buildDescription(option: OrderDraftOption, originalMessage: string): string {
   return [
     `<p><strong>${option.title}</strong></p>`,
-    `<p>风格：${option.style}</p>`,
-    `<p>工艺：${inferCraft(option.style)}</p>`,
-    `<p>用户需求：${originalMessage}</p>`,
-    "<p>发货说明：定制商品预计 30 天左右制作并发货。</p>",
-    "<p>定制说明：最终成品将按照当前确认方案生产。</p>"
+    `<p>Style: ${option.style}</p>`,
+    `<p>Craft: ${inferCraft(option.style, language)}</p>`,
+    `<p>Request: ${originalMessage}</p>`,
+    "<p>Shipping note: custom orders usually take around 30 days for production and delivery.</p>",
+    "<p>Customization note: final production follows the confirmed design.</p>"
   ].join("");
-}
-
-function createOptions(message: string, shippingType: ShippingType): OrderDraftOption[] {
-  const optionAStyle = /黑金|ssr/i.test(message) ? "黑金SSR" : "动漫卡牌";
-  const optionBStyle = /赛博朋克|cyberpunk/i.test(message) ? "赛博朋克" : "赛博朋克";
-  const optionCStyle = /签名|收藏|limited/i.test(message) ? "高级收藏签名卡" : "高级收藏签名卡";
-
-  return [
-    {
-      id: "A",
-      title: "黑金SSR典藏卡",
-      style: optionAStyle,
-      description: "黑金 / SSR / 全息 / 动漫角色",
-      estimatedPrice: pricingService.inferPrice("ssr 黑金").price,
-      shippingType,
-      prompt: buildCommercialPrompt(message, optionAStyle)
-    },
-    {
-      id: "B",
-      title: "赛博朋克战斗卡",
-      style: optionBStyle,
-      description: "赛博朋克 / 霓虹 / 战斗感",
-      estimatedPrice: 39.99,
-      shippingType,
-      prompt: buildCommercialPrompt(message, optionBStyle)
-    },
-    {
-      id: "C",
-      title: "高级收藏签名卡",
-      style: optionCStyle,
-      description: "限量 / 签名 / 收藏级",
-      estimatedPrice: pricingService.inferPrice("限量签名").price,
-      shippingType,
-      prompt: buildCommercialPrompt(message, optionCStyle)
-    }
-  ];
 }
 
 function buildDraftOptionsReply(language: LanguagePreference, options: OrderDraftOption[]): string {
@@ -193,6 +138,7 @@ function buildOrderLinkReply(params: {
   linkType: "product" | "checkout";
 }): string {
   const { language, orderNo, title, price, url, linkType } = params;
+
   if (language === "zh") {
     return [
       linkType === "checkout" ? "✅ 付款链接已生成" : "✅ 产品链接已生成",
@@ -223,7 +169,9 @@ async function maybeCreateProject(input: WorkflowInput, prompt: string): Promise
 export class SalesWorkflowService {
   async createDraftOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const shippingType = stateManagerService.inferShippingType(input.message, input.memory);
-    const options = createOptions(input.message, shippingType);
+    console.log(`[LANGUAGE] detected=${input.language}`);
+    console.log(`[CONCEPT] using ${input.language} templates`);
+    const options = buildConceptOptions(input.message, input.language, shippingType);
     const project = await maybeCreateProject(input, options[0].prompt);
     const order =
       (input.memory.currentOrderDraft?.orderId && (await orderService.getOrderById(input.memory.currentOrderDraft.orderId))) ||
@@ -276,6 +224,7 @@ export class SalesWorkflowService {
       reply: buildDraftOptionsReply(input.language, options),
       stage: "draft_design",
       memoryPatch: {
+        language: input.language,
         flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
@@ -296,7 +245,7 @@ export class SalesWorkflowService {
       return {
         reply: t(input.language, "我还没有可选方案，请先让我为你生成 A/B/C 方案。", "I do not have card options yet. Let me generate A/B/C concepts first."),
         stage: input.memory.currentStage || "idle",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -309,7 +258,7 @@ export class SalesWorkflowService {
       return {
         reply: t(input.language, `图片生成失败：${generated.error || "未知错误"}`, `Image generation failed: ${generated.error || "Unknown error"}`),
         stage: "draft_design",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -329,6 +278,7 @@ export class SalesWorkflowService {
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
+        language: input.language,
         flowMode: "AI_CARD_ORDER",
         stage: "waiting_confirmation",
         currentStage: "waiting_confirmation",
@@ -345,14 +295,14 @@ export class SalesWorkflowService {
         latestPrice: selectedOption.estimatedPrice.toFixed(2),
         latestShippingType: selectedOption.shippingType,
         latestProductTitle: selectedOption.title,
-        latestProductDescription: buildDescription(selectedOption, draft.originalMessage),
+        latestProductDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
         currentOrderDraft: {
           ...draft,
           stage: "waiting_confirmation",
           selectedOption,
           imageUrl: generated.imageUrl || "",
           productTitle: selectedOption.title,
-          productDescription: buildDescription(selectedOption, draft.originalMessage),
+          productDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
           price: selectedOption.estimatedPrice.toFixed(2),
           shippingType: selectedOption.shippingType
         }
@@ -374,7 +324,7 @@ export class SalesWorkflowService {
       return {
         reply: t(input.language, `图片生成失败：${generated.error || "未知错误"}`, `Image generation failed: ${generated.error || "Unknown error"}`),
         stage: "waiting_confirmation",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -407,6 +357,7 @@ export class SalesWorkflowService {
       stage: "waiting_confirmation",
       imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
       memoryPatch: {
+        language: input.language,
         flowMode: "AI_CARD_ORDER",
         stage: "waiting_confirmation",
         currentStage: "waiting_confirmation",
@@ -423,7 +374,7 @@ export class SalesWorkflowService {
           stage: "waiting_confirmation",
           selectedOption: { ...updatedOption, prompt: revisedPrompt },
           imageUrl: generated.imageUrl || "",
-          productDescription: buildDescription(updatedOption, draft.originalMessage)
+          productDescription: buildDescription(updatedOption, draft.originalMessage, input.language)
         }
       }
     };
@@ -432,10 +383,10 @@ export class SalesWorkflowService {
   async regenerateOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const draft = input.memory.currentOrderDraft;
     const baseMessage = draft?.originalMessage || input.message;
-    const refreshed = createOptions(
-      `${baseMessage} ${input.message}`,
-      draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory)
-    );
+    const shippingType = draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory);
+    console.log(`[LANGUAGE] detected=${input.language}`);
+    console.log(`[CONCEPT] using ${input.language} templates`);
+    const refreshed = buildConceptOptions(`${baseMessage} ${input.message}`, input.language, shippingType);
 
     if (input.project?.projectId) {
       await memoryService.replaceImageOptions(
@@ -463,6 +414,7 @@ export class SalesWorkflowService {
       reply: buildDraftOptionsReply(input.language, refreshed),
       stage: "draft_design",
       memoryPatch: {
+        language: input.language,
         flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
@@ -508,7 +460,7 @@ export class SalesWorkflowService {
           linkType: requestedLinkType
         }),
         stage: "payment_stage",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -516,7 +468,7 @@ export class SalesWorkflowService {
       return {
         reply: t(input.language, "我还没有你的确认设计，请先选择方案并生成卡牌图。", "I do not have your confirmed design yet. Please choose a concept and generate the card image first."),
         stage: input.memory.currentStage || "idle",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -524,7 +476,7 @@ export class SalesWorkflowService {
     const created = await shopifyService.createShopifyProductFromDiscord({
       title: draft.selectedOption.title,
       price: Number(draft.price || draft.selectedOption.estimatedPrice),
-      description: draft.productDescription || buildDescription(draft.selectedOption, draft.originalMessage),
+      description: draft.productDescription || buildDescription(draft.selectedOption, draft.originalMessage, input.language),
       imageUrl: draft.imageUrl,
       shippingType: draft.shippingType,
       tags: ["discord-order", "custom-card", "lootcard-ai", draft.selectedOption.style],
@@ -539,7 +491,7 @@ export class SalesWorkflowService {
       return {
         reply: t(input.language, `Shopify 产品创建失败：${created.error || "未知错误"}`, `Shopify product creation failed: ${created.error || "Unknown error"}`),
         stage: "waiting_confirmation",
-        memoryPatch: {}
+        memoryPatch: { language: input.language }
       };
     }
 
@@ -599,6 +551,7 @@ export class SalesWorkflowService {
       }),
       stage: "payment_stage",
       memoryPatch: {
+        language: input.language,
         flowMode: "IDLE",
         stage: "payment_stage",
         currentStage: "payment_stage",
@@ -628,7 +581,7 @@ export class SalesWorkflowService {
     return {
       reply,
       stage: input.memory.currentStage || "idle",
-      memoryPatch: {}
+      memoryPatch: { language: input.language }
     };
   }
 }
