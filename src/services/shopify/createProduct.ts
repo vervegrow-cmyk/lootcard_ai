@@ -1,3 +1,5 @@
+import { ShippingType } from "../../types";
+
 export interface ShopifyGraphqlCreateProductInput {
   shop: string;
   accessToken: string;
@@ -9,6 +11,11 @@ export interface ShopifyGraphqlCreateProductInput {
   vendor?: string;
   productType?: string;
   sku?: string;
+  imageUrl?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  shippingType?: ShippingType;
+  inventoryQuantity?: number;
 }
 
 export interface ShopifyGraphqlCreateProductResult {
@@ -88,6 +95,63 @@ async function postGraphql<TData>(params: {
   };
 }
 
+async function attachProductImage(params: {
+  shop: string;
+  accessToken: string;
+  apiVersion: string;
+  productId: string;
+  imageUrl: string;
+  altText: string;
+}): Promise<void> {
+  const mutation = `
+    mutation AddProductMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media {
+          alt
+          mediaContentType
+          status
+        }
+        mediaUserErrors {
+          field
+          message
+        }
+      }
+    }
+  `;
+
+  const created = await postGraphql<
+    GraphqlResponse<{
+      productCreateMedia?: {
+        mediaUserErrors?: Array<{ message: string }>;
+      };
+    }>
+  >({
+    shop: params.shop,
+    accessToken: params.accessToken,
+    apiVersion: params.apiVersion,
+    query: mutation,
+    variables: {
+      productId: params.productId,
+      media: [
+        {
+          originalSource: params.imageUrl,
+          mediaContentType: "IMAGE",
+          alt: params.altText
+        }
+      ]
+    }
+  });
+
+  if (!created.ok || !created.data) {
+    throw new Error(`Shopify media upload failed: ${created.status} ${created.text}`);
+  }
+
+  const mediaErrors = created.data.data?.productCreateMedia?.mediaUserErrors || [];
+  if (mediaErrors.length > 0) {
+    throw new Error(`Shopify media upload failed: ${mediaErrors.map((item) => item.message).join("; ")}`);
+  }
+}
+
 export async function createShopifyProductGraphql(
   input: ShopifyGraphqlCreateProductInput
 ): Promise<ShopifyGraphqlCreateProductResult> {
@@ -127,7 +191,11 @@ export async function createShopifyProductGraphql(
         vendor: input.vendor || "LootCard AI",
         productType: input.productType || "Custom Product",
         tags: input.tags,
-        status: "ACTIVE"
+        status: "ACTIVE",
+        seo: {
+          title: input.seoTitle || input.title,
+          description: input.seoDescription || input.title
+        }
       }
     }
   });
@@ -214,6 +282,17 @@ export async function createShopifyProductGraphql(
         error: variantErrors.map((item) => item.message).join("; ")
       };
     }
+  }
+
+  if (productId && input.imageUrl) {
+    await attachProductImage({
+      shop: input.shop,
+      accessToken: input.accessToken,
+      apiVersion: input.apiVersion,
+      productId,
+      imageUrl: input.imageUrl,
+      altText: input.title
+    });
   }
 
   if (productId) {

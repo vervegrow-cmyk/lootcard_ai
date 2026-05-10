@@ -29,9 +29,12 @@ export class AiRouterService {
         "poster",
         "logo",
         "main image",
-        "packaging image"
+        "packaging image",
+        "anime card",
+        "trading card",
+        "black gold ssr"
       ]) ||
-      /生成图片|做个图|做图|生成图|出图|画图|设计图|帮我做个图|预览图|卡牌图|海报|logo|主图|包装图/.test(
+      /生成图片|做个图|做图|生成图|出图|画图|设计图|帮我做个图|预览图|卡牌图|海报|logo|主图|包装图|黑金SSR/.test(
         message
       )
     ) {

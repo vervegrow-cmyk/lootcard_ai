@@ -9,7 +9,14 @@ export type ProjectStage =
   | "revising"
   | "confirmed"
   | "payment"
-  | "completed";
+  | "completed"
+  | "draft_design"
+  | "waiting_confirmation"
+  | "modifying_design"
+  | "creating_shopify_product"
+  | "payment_stage";
+
+export type ShippingType = "digital_download" | "physical_card_us" | "physical_card_cn";
 
 export interface ConversationEntry {
   role: "user" | "assistant";
@@ -23,11 +30,15 @@ export interface ImageOption {
   imageUrl: string;
   prompt: string;
   summary?: string;
+  style?: string;
+  provider?: string;
+  model?: string;
 }
 
 export interface ProjectMemory {
   language: LanguagePreference;
   stage: ProjectStage;
+  currentStage: ProjectStage;
   theme: string;
   character: string;
   style: string;
@@ -44,6 +55,19 @@ export interface ProjectMemory {
   selectedDesignSummary: string;
   revisionHistory: string[];
   shopifyProductUrl: string;
+  latestImageUrl: string;
+  latestPrompt: string;
+  latestDesignStyle: string;
+  latestImageProvider: string;
+  latestImageModel: string;
+  latestProductTitle: string;
+  latestProductDescription: string;
+  latestPrice: string;
+  latestShippingType: ShippingType;
+  latestShopifyProductId: string;
+  latestShopifyProductUrl: string;
+  recentPurchaseContent: string;
+  preferredStyles: string[];
 }
 
 export interface DesignRequirements {
@@ -104,6 +128,7 @@ export interface SkillExecutionResult {
 export const EMPTY_PROJECT_MEMORY: ProjectMemory = {
   language: "en",
   stage: "idle",
+  currentStage: "idle",
   theme: "",
   character: "",
   style: "",
@@ -119,5 +144,18 @@ export const EMPTY_PROJECT_MEMORY: ProjectMemory = {
   selectedImageUrl: "",
   selectedDesignSummary: "",
   revisionHistory: [],
-  shopifyProductUrl: ""
+  shopifyProductUrl: "",
+  latestImageUrl: "",
+  latestPrompt: "",
+  latestDesignStyle: "",
+  latestImageProvider: "",
+  latestImageModel: "",
+  latestProductTitle: "",
+  latestProductDescription: "",
+  latestPrice: "",
+  latestShippingType: "physical_card_cn",
+  latestShopifyProductId: "",
+  latestShopifyProductUrl: "",
+  recentPurchaseContent: "",
+  preferredStyles: []
 };

@@ -1,4 +1,4 @@
-import { ShopifyProductDraft, ShopifyProductResult } from "../types";
+import { ShippingType, ShopifyProductDraft, ShopifyProductResult } from "../types";
 import { shopifyAuthService } from "./shopify-auth.service";
 import { createShopifyProductGraphql } from "./shopify/createProduct";
 
@@ -11,6 +11,11 @@ export interface CreateShopifyProductInput {
   vendor?: string;
   productType?: string;
   sku?: string;
+  imageUrl?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  shippingType?: ShippingType;
+  inventoryQuantity?: number;
 }
 
 export interface CreateShopifyProductOutput {
@@ -57,7 +62,14 @@ function htmlDescription(input?: string): string {
 }
 
 function discordOrderDescription(input?: string): string {
-  return input?.trim() || "Custom product created from Discord order request.";
+  return (
+    input?.trim() ||
+    [
+      "Custom product created from Discord order request.",
+      "Production and delivery usually takes about 30 days.",
+      "Final production follows the confirmed AI card design."
+    ].join("<br><br>")
+  );
 }
 
 export function isShopifyConfigured(): boolean {
@@ -141,7 +153,12 @@ export class ShopifyService {
         tags,
         vendor: input.vendor,
         productType: input.productType,
-        sku: input.sku
+        sku: input.sku,
+        imageUrl: input.imageUrl,
+        seoTitle: input.seoTitle,
+        seoDescription: input.seoDescription,
+        shippingType: input.shippingType,
+        inventoryQuantity: input.inventoryQuantity
       });
 
       if (!created.ok && /401|403|Reauthorization/i.test(created.error || "")) {
@@ -177,6 +194,11 @@ export class ShopifyService {
     price?: number;
     description?: string;
     shop?: string;
+    imageUrl?: string;
+    shippingType?: ShippingType;
+    tags?: string[];
+    seoTitle?: string;
+    seoDescription?: string;
   }): Promise<CreateShopifyProductOutput> {
     return this.createShopifyProduct({
       shop: input.shop,
@@ -185,8 +207,13 @@ export class ShopifyService {
       description: discordOrderDescription(input.description),
       vendor: "LootCard AI",
       productType: "Custom Product",
-      tags: ["discord-order", "lootcard-ai"],
-      sku: `DISCORD-${Date.now()}`
+      tags: input.tags?.length ? input.tags : ["discord-order", "lootcard-ai"],
+      sku: `DISCORD-${Date.now()}`,
+      imageUrl: input.imageUrl,
+      shippingType: input.shippingType,
+      seoTitle: input.seoTitle,
+      seoDescription: input.seoDescription,
+      inventoryQuantity: 100
     });
   }
 

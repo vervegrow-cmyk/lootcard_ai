@@ -59,6 +59,9 @@ export class MemoryService {
     const next: HermesMemory = {
       ...current,
       ...patch,
+      stage: patch.stage ?? current.stage,
+      currentStage: patch.currentStage ?? patch.stage ?? current.currentStage,
+      preferredStyles: patch.preferredStyles ?? current.preferredStyles,
       revisionHistory: patch.revisionHistory ?? current.revisionHistory
     };
     this.fallbackMemory.set(discordUserId, next);
@@ -79,7 +82,7 @@ export class MemoryService {
             discordUserId,
             username,
             profile: serializeMemory(fallback),
-            stage: fallback.stage
+            stage: fallback.currentStage || fallback.stage
           }
         });
 
@@ -94,7 +97,8 @@ export class MemoryService {
       const persistedMemory = {
         ...fallback,
         ...safeParseMemory(existing.profile),
-        stage: castStage(existing.stage || fallback.stage)
+        stage: castStage(existing.stage || fallback.stage),
+        currentStage: castStage(existing.stage || fallback.currentStage || fallback.stage)
       };
       this.fallbackMemory.set(discordUserId, persistedMemory);
 
@@ -133,13 +137,13 @@ export class MemoryService {
         where: { discordUserId: params.discordUserId },
         update: {
           username: params.username,
-          stage: nextMemory.stage,
+          stage: nextMemory.currentStage || nextMemory.stage,
           profile: serializeMemory(nextMemory)
         },
         create: {
           discordUserId: params.discordUserId,
           username: params.username,
-          stage: nextMemory.stage,
+          stage: nextMemory.currentStage || nextMemory.stage,
           profile: serializeMemory(nextMemory)
         }
       });
@@ -161,6 +165,7 @@ export class MemoryService {
         ...result.memory_update,
         language: result.language,
         stage: result.stage,
+        currentStage: result.stage,
         revisionHistory: mergedHistory
       }
     });
@@ -237,7 +242,7 @@ export class MemoryService {
       const project = await prisma.cardProject.create({
         data: {
           discordUserId,
-          status: "prompting",
+          status: "draft_design",
           originalPrompt,
           currentPrompt
         }
@@ -264,7 +269,7 @@ export class MemoryService {
     } catch {
       const context: ProjectContext = {
         projectId: `memory-${discordUserId}`,
-        status: "prompting",
+        status: "draft_design",
         originalPrompt,
         currentPrompt
       };

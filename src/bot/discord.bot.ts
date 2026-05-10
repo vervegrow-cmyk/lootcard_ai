@@ -1,9 +1,9 @@
 import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
 import { aiRouterService } from "../services/ai-router.service";
-import { imageService } from "../services/image.service";
 import { memoryService } from "../services/memory.service";
 import { openRouterService } from "../services/openrouter.service";
-import { shopifyService } from "../services/shopify.service";
+import { salesWorkflowService } from "../services/sales-workflow.service";
+import { stateManagerService } from "../services/state-manager.service";
 import { logger } from "../utils/logger";
 
 function requireEnv(name: string): string {
@@ -42,39 +42,35 @@ function detectLanguage(message: string, fallback: "zh" | "en" = "en"): "zh" | "
   return /[\u4e00-\u9fff]/.test(message) ? "zh" : fallback;
 }
 
-function formatCurrency(value?: number): string {
-  const amount = Number(value ?? process.env.DEFAULT_CARD_PRICE ?? "29.99");
-  return Number.isFinite(amount) ? amount.toFixed(2) : "29.99";
-}
-
-function formatShopifyReply(params: {
-  ok: boolean;
-  title?: string;
-  price?: number;
-  productUrl?: string;
-  adminUrl?: string;
-  productId?: string;
-  error?: string;
-}): string {
-  if (!params.ok) {
-    return `Shopify 产品创建失败：${params.error || "未知错误"}`;
-  }
-
-  return [
-    "✅ Shopify 产品已创建",
-    "",
-    `商品名：${params.title || "Custom AI Trading Card"}`,
-    `价格：$${formatCurrency(params.price)}`,
-    `商品ID：${params.productId || "-"}`,
-    `下单链接：${params.productUrl || "-"}`,
-    `后台链接：${params.adminUrl || "-"}`,
-    "",
-    "你可以点击下单链接直接购买。"
-  ].join("\n");
-}
-
 function isEchoModeEnabled(): boolean {
   return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
+}
+
+async function buildAttachmentsFromUrls(urls: string[]): Promise<AttachmentBuilder[]> {
+  const attachments: AttachmentBuilder[] = [];
+
+  for (let index = 0; index < urls.length; index += 1) {
+    const imageUrl = urls[index];
+    if (!imageUrl) {
+      continue;
+    }
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download generated image: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "image/png";
+    const extension = contentType.includes("jpeg") ? "jpg" : contentType.includes("webp") ? "webp" : "png";
+    const arrayBuffer = await response.arrayBuffer();
+    attachments.push(
+      new AttachmentBuilder(Buffer.from(arrayBuffer), {
+        name: `lootcard-design-${index + 1}.${extension}`
+      })
+    );
+  }
+
+  return attachments;
 }
 
 export class DiscordBot {
@@ -127,50 +123,56 @@ export class DiscordBot {
       }
 
       let finalReply = "";
-      let attachment: AttachmentBuilder | null = null;
+      let attachments: AttachmentBuilder[] = [];
 
       try {
+        const snapshot = await memoryService.getOrCreateUserMemory(inbound.discordUserId, inbound.username);
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
+        const project = await memoryService.getLatestProject(inbound.discordUserId);
         const taskType = aiRouterService.detectTaskType(inbound.content);
+
         console.log(`[AI ROUTER] taskType=${taskType}`);
 
-        if (taskType === "image_generation") {
-          const generated = await imageService.generateImage(inbound.content);
-          if (!generated.ok) {
-            finalReply = `图片生成失败：${generated.error || "未知错误"}`;
-          } else if (generated.imageBase64) {
-            attachment = new AttachmentBuilder(Buffer.from(generated.imageBase64, "base64"), {
-              name: "siliconflow-image.png"
-            });
-            finalReply = "图片已生成，已附上真实图片。";
-          } else if (generated.imageUrl) {
-            finalReply = `图片已生成：${generated.imageUrl}`;
-          } else {
-            finalReply = "图片生成失败：SiliconFlow 未返回可用图片。";
-          }
-        } else if (taskType === "shopify_product_create") {
-          const request = aiRouterService.extractShopifyProductRequest(inbound.content);
-          const created = await shopifyService.createShopifyProductFromDiscord({
-            title: request.title,
-            price: request.price,
-            description: request.description
-          });
+        const workflowInput = {
+          discordUserId: inbound.discordUserId,
+          username: inbound.username,
+          message: inbound.content,
+          language,
+          memory: snapshot.memory,
+          project,
+          recentConversation
+        } as const;
 
-          finalReply = formatShopifyReply({
-            ok: created.ok,
-            title: created.title || request.title,
-            price: created.price || request.price,
-            productUrl: created.productUrl,
-            adminUrl: created.adminUrl,
-            productId: created.productId,
-            error: created.error
-          });
+        let workflowResult;
+
+        if (stateManagerService.isPurchaseConfirmation(inbound.content)) {
+          workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
+        } else if (stateManagerService.wantsModification(inbound.content) && snapshot.memory.latestPrompt) {
+          workflowResult = await salesWorkflowService.modifyDraft(workflowInput);
+        } else if (stateManagerService.wantsMoreOptions(inbound.content) && snapshot.memory.latestPrompt) {
+          workflowResult = await salesWorkflowService.generateMoreOptions(workflowInput);
+        } else if (taskType === "image_generation") {
+          workflowResult = await salesWorkflowService.generateDraft(workflowInput);
+        } else if (taskType === "shopify_product_create") {
+          workflowResult = await salesWorkflowService.createOrderLink(workflowInput);
         } else {
-          finalReply = await openRouterService.chat({
-            message: inbound.content,
-            history: recentConversation,
-            language
-          });
+          workflowResult = await salesWorkflowService.answerGeneralQuestion(workflowInput);
+        }
+
+        await memoryService.updateUserMemory({
+          discordUserId: inbound.discordUserId,
+          username: inbound.username,
+          memoryPatch: workflowResult.memoryPatch
+        });
+
+        if (project?.projectId && workflowResult.projectPatch) {
+          await memoryService.updateProject(project.projectId, workflowResult.projectPatch);
+        }
+
+        finalReply = workflowResult.reply;
+
+        if (workflowResult.imageUrls?.length) {
+          attachments = await buildAttachmentsFromUrls(workflowResult.imageUrls);
         }
       } catch (error) {
         logger.error("Failed to process Discord message", error);
@@ -184,10 +186,10 @@ export class DiscordBot {
       }
 
       try {
-        if (attachment) {
-          await message.reply({
+        if (attachments.length > 0) {
+          await message.channel.send({
             content: finalReply,
-            files: [attachment]
+            files: attachments
           });
         } else {
           await message.reply(finalReply);

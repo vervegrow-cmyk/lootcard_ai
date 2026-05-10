@@ -1,5 +1,13 @@
 export type ProjectStage =
   | "idle"
+  | "customer_service"
+  | "collecting"
+  | "draft_design"
+  | "waiting_confirmation"
+  | "modifying_design"
+  | "creating_shopify_product"
+  | "payment_stage"
+  | "completed"
   | "prompting"
   | "generating"
   | "selecting"
@@ -8,6 +16,8 @@ export type ProjectStage =
   | "payment";
 
 export type LanguagePreference = "zh" | "en";
+
+export type ShippingType = "digital_download" | "physical_card_us" | "physical_card_cn";
 
 export type HermesIntent =
   | "answer_question"
@@ -41,6 +51,22 @@ export interface ImageOption {
   title: string;
   imageUrl: string;
   prompt: string;
+  summary?: string;
+  style?: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface GeneratedImageResult {
+  ok: boolean;
+  imageUrl?: string;
+  imageBase64?: string;
+  imagePrompt?: string;
+  imageStyle?: string;
+  imageProvider?: string;
+  imageModel?: string;
+  summary?: string;
+  error?: string;
 }
 
 export interface ShopifyProductDraft {
@@ -97,6 +123,7 @@ export interface PromptPolishResult {
 export interface HermesMemory {
   language: LanguagePreference;
   stage: ProjectStage;
+  currentStage: ProjectStage;
   theme: string;
   character: string;
   style: string;
@@ -110,6 +137,20 @@ export interface HermesMemory {
   selectedImageUrl: string;
   selectedDesignSummary: string;
   revisionHistory: string[];
+  latestImageUrl: string;
+  latestPrompt: string;
+  latestDesignStyle: string;
+  latestImageProvider: string;
+  latestImageModel: string;
+  latestProductTitle: string;
+  latestProductDescription: string;
+  latestPrice: string;
+  latestShippingType: ShippingType;
+  latestShopifyProductId: string;
+  latestShopifyProductUrl: string;
+  shopifyProductUrl: string;
+  recentPurchaseContent: string;
+  preferredStyles: string[];
 }
 
 export interface UserMemorySnapshot {
@@ -154,6 +195,7 @@ export const EMPTY_REQUIREMENTS: CardRequirements = {
 export const EMPTY_HERMES_MEMORY: HermesMemory = {
   language: "en",
   stage: "idle",
+  currentStage: "idle",
   theme: "",
   character: "",
   style: "",
@@ -166,7 +208,21 @@ export const EMPTY_HERMES_MEMORY: HermesMemory = {
   selectedOptionTitle: "",
   selectedImageUrl: "",
   selectedDesignSummary: "",
-  revisionHistory: []
+  revisionHistory: [],
+  latestImageUrl: "",
+  latestPrompt: "",
+  latestDesignStyle: "",
+  latestImageProvider: "",
+  latestImageModel: "",
+  latestProductTitle: "",
+  latestProductDescription: "",
+  latestPrice: "",
+  latestShippingType: "physical_card_cn",
+  latestShopifyProductId: "",
+  latestShopifyProductUrl: "",
+  shopifyProductUrl: "",
+  recentPurchaseContent: "",
+  preferredStyles: []
 };
 
 export function memoryToRequirements(memory: HermesMemory): CardRequirements {

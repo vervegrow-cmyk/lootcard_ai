@@ -1,4 +1,4 @@
-import { ImageOption } from "../types";
+import { GeneratedImageResult, ImageOption } from "../types";
 
 function env(name: string): string {
   return process.env[name]?.trim() || "";
@@ -16,17 +16,26 @@ interface SiliconFlowErrorResponse {
   message?: string;
 }
 
+function inferStyle(prompt: string): string {
+  const text = prompt.toLowerCase();
+  if (/(黑金|black gold)/.test(text) && /ssr/.test(text)) {
+    return "黑金SSR";
+  }
+  if (/(赛博朋克|cyberpunk)/.test(text)) {
+    return "赛博朋克";
+  }
+  if (/(anime card|trading card|动漫卡|动漫卡牌)/.test(text)) {
+    return "动漫收藏卡";
+  }
+  return "高级卡牌设计";
+}
+
 export class ImageService {
   private getProvider(): string {
     return env("IMAGE_PROVIDER").toLowerCase();
   }
 
-  async generateImage(prompt: string): Promise<{
-    ok: boolean;
-    imageUrl?: string;
-    imageBase64?: string;
-    error?: string;
-  }> {
+  async generateImage(prompt: string, styleHint?: string): Promise<GeneratedImageResult> {
     const provider = this.getProvider();
     console.log(`[IMAGE] provider=${provider || "unconfigured"}`);
 
@@ -48,26 +57,26 @@ export class ImageService {
     console.log(`[IMAGE] model=${model}`);
     console.log("[IMAGE] generating");
 
+    const attempt = async (targetModel: string) => {
+      const response = await fetch("https://api.siliconflow.cn/v1/images/generations", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          prompt,
+          image_size: "768x1024",
+          batch_size: 1
+        })
+      });
+
+      const text = await response.text();
+      return { response, text, model: targetModel };
+    };
+
     try {
-      const attempt = async (targetModel: string) => {
-        const response = await fetch("https://api.siliconflow.cn/v1/images/generations", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: targetModel,
-            prompt,
-            image_size: "768x1024",
-            batch_size: 1
-          })
-        });
-
-        const text = await response.text();
-        return { response, text, model: targetModel };
-      };
-
       let attemptResult = await attempt(model);
       let parsedError: SiliconFlowErrorResponse | null = null;
       try {
@@ -107,15 +116,17 @@ export class ImageService {
       return {
         ok: true,
         imageUrl,
-        imageBase64
+        imageBase64,
+        imagePrompt: prompt,
+        imageStyle: styleHint || inferStyle(prompt),
+        imageProvider: provider,
+        imageModel: attemptResult.model,
+        summary: `${styleHint || inferStyle(prompt)} 设计已生成`
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`[IMAGE] failed error=${message}`);
-      return {
-        ok: false,
-        error: message
-      };
+      return { ok: false, error: message };
     }
   }
 
@@ -138,16 +149,20 @@ export class ImageService {
     const items: ImageOption[] = [];
 
     for (let index = 0; index < count; index += 1) {
-      const generated = await this.generateImage(normalized.prompt);
+      const generated = await this.generateImage(`${normalized.prompt}. Variation ${index + 1}`, inferStyle(normalized.prompt));
       if (!generated.ok) {
         throw new Error(generated.error || "Image generation failed.");
       }
 
       items.push({
         id: String.fromCharCode(65 + index),
-        title: `Generated Image ${index + 1}`,
+        title: `${generated.imageStyle || "Card Design"} ${index + 1}`,
         imageUrl: generated.imageUrl || "",
-        prompt: normalized.prompt
+        prompt: generated.imagePrompt || normalized.prompt,
+        summary: generated.summary,
+        style: generated.imageStyle,
+        provider: generated.imageProvider,
+        model: generated.imageModel
       });
     }
 
@@ -159,15 +174,16 @@ export class ImageService {
     prompt: string;
     revisionText: string;
   }): Promise<{ imageUrl: string; prompt: string; summary: string }> {
-    const generated = await this.generateImage(`${input.prompt}. Revision request: ${input.revisionText}`);
+    const revisedPrompt = `${input.prompt}. Revision request: ${input.revisionText}`;
+    const generated = await this.generateImage(revisedPrompt);
     if (!generated.ok) {
       throw new Error(generated.error || "Image revision failed.");
     }
 
     return {
       imageUrl: generated.imageUrl || "",
-      prompt: `${input.prompt}. Revision request: ${input.revisionText}`,
-      summary: `Revision applied: ${input.revisionText}`
+      prompt: revisedPrompt,
+      summary: generated.summary || `Revision applied: ${input.revisionText}`
     };
   }
 
@@ -176,7 +192,7 @@ export class ImageService {
     styleName: string;
     projectId: string;
   }): Promise<{ imageUrl: string }> {
-    const generated = await this.generateImage(`${input.imagePrompt}, ${input.styleName}`);
+    const generated = await this.generateImage(`${input.imagePrompt}, ${input.styleName}`, input.styleName);
     if (!generated.ok) {
       throw new Error(generated.error || "Image generation failed.");
     }
