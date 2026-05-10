@@ -13,6 +13,35 @@ function sha1(value: string): string {
 }
 
 export class StorageService {
+  async downloadImageAsset(url: string): Promise<{
+    attachment: string;
+    fileName: string;
+    mimeType: string;
+  }> {
+    if (!url) {
+      throw new Error("Missing image URL for download.");
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download image asset: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") || "image/png";
+    const extension = contentType.includes("jpeg")
+      ? "jpg"
+      : contentType.includes("webp")
+        ? "webp"
+        : "png";
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    return {
+      attachment: buffer.toString("base64"),
+      fileName: `lootcard-${Date.now()}.${extension}`,
+      mimeType: contentType
+    };
+  }
+
   isConfigured(): boolean {
     const provider = env("CDN_PROVIDER").toLowerCase();
     if (provider === "cloudinary") {

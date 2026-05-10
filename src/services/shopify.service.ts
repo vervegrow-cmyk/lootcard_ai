@@ -293,6 +293,7 @@ async function uploadRestProductImage(params: {
   }
 
   console.log("[SHOPIFY IMAGE] fallback REST image upload start");
+  const asset = await storageService.downloadImageAsset(params.imageUrl);
   const response = await fetch(
     `https://${params.shop}/admin/api/${params.apiVersion}/products/${numericProductId}/images.json`,
     {
@@ -303,7 +304,8 @@ async function uploadRestProductImage(params: {
       },
       body: JSON.stringify({
         image: {
-          src: params.imageUrl,
+          attachment: asset.attachment,
+          filename: asset.fileName,
           alt: params.altText,
           position: 1
         }
