@@ -64,6 +64,25 @@ function isOrderQuery(message: string): boolean {
   return /我的订单|订单查询|查看订单/.test(message) || lower.includes("order status");
 }
 
+function shouldReuseDraftForMessage(
+  message: string,
+  draft: { stage?: string } | null | undefined
+): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  if (draft.stage !== "shopify_created" && draft.stage !== "completed") {
+    return true;
+  }
+
+  return (
+    stateManagerService.wantsCheckoutLink(message) ||
+    stateManagerService.wantsProductLink(message) ||
+    stateManagerService.isPurchaseConfirmation(message)
+  );
+}
+
 function orderStatusLabel(status: OrderStatus): string {
   const labels: Record<OrderStatus, string> = {
     DRAFT: "草稿",
@@ -187,9 +206,12 @@ export class DiscordBot {
         const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
         const project = await memoryService.getLatestProject(inbound.discordUserId);
         const activeOrder = await orderService.getLatestActiveOrderByDiscordUser(inbound.discordUserId);
-        const restoredDraft =
+        const persistedDraft =
           snapshot.memory.currentOrderDraft ||
           (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
+        const restoredDraft = shouldReuseDraftForMessage(inbound.content, persistedDraft)
+          ? persistedDraft
+          : null;
         const aiRoute = aiRouterService.detectRoute(inbound.content);
         const taskType = aiRoute.taskType;
         const flowMode = sessionService.resolveFlowMode(snapshot.memory, restoredDraft);
@@ -229,6 +251,9 @@ export class DiscordBot {
 
         console.log(`[AI ROUTER] taskType=${taskType}`);
         console.log(`[SESSION] flowMode=${flowMode}`);
+        if (persistedDraft && !restoredDraft) {
+          console.log("[SESSION] stale checkout draft ignored for current message");
+        }
 
         const workflowInput = {
           discordUserId: inbound.discordUserId,
