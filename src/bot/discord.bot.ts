@@ -1,4 +1,5 @@
 import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
+import { designAgent } from "../agents/design.agent";
 import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
 import { aiRouterService } from "../services/ai-router.service";
 import { memoryService } from "../services/memory.service";
@@ -187,7 +188,8 @@ export class DiscordBot {
         const restoredDraft =
           snapshot.memory.currentOrderDraft ||
           (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
-        const taskType = aiRouterService.detectTaskType(inbound.content);
+        const aiRoute = aiRouterService.detectRoute(inbound.content);
+        const taskType = aiRoute.taskType;
 
         console.log("[AGENT] route start");
         const plan = hermesOrchestratorAgent.plan({
@@ -212,8 +214,8 @@ export class DiscordBot {
         });
         console.log("[AGENT] route result", {
           intent: plan.intent,
-          targetAgent: plan.targetAgent,
-          targetSkill: plan.targetSkill
+          targetAgent: taskType === "image_generation" ? aiRoute.targetAgent : plan.targetAgent,
+          targetSkill: taskType === "image_generation" ? aiRoute.targetSkill : plan.targetSkill
         });
 
         console.log(`[AI ROUTER] taskType=${taskType}`);
@@ -248,6 +250,37 @@ export class DiscordBot {
           workflowResult = await salesWorkflowService.modifyCurrentDesign(workflowInput);
         } else if (stateManagerService.wantsMoreOptions(inbound.content) && draft) {
           workflowResult = await salesWorkflowService.regenerateOptions(workflowInput);
+        } else if (taskType === "image_generation" && !draft) {
+          const skillMemory = {
+            ...((snapshot.memory as unknown) as Record<string, unknown>),
+            currentOrderDraft: restoredDraft
+          } as never;
+
+          const skillResult = await designAgent.execute(plan, {
+            discordUserId: inbound.discordUserId,
+            username: inbound.username,
+            message: inbound.content,
+            language,
+            memory: skillMemory,
+            recentConversation,
+            project,
+            data: plan.data
+          });
+
+          finalReply = skillResult.reply;
+          if (skillResult.imageOptions?.length) {
+            attachments = await buildAttachmentsFromUrls(
+              skillResult.imageOptions.map((item) => item.imageUrl).filter(Boolean)
+            );
+          }
+
+          await memoryService.updateUserMemory({
+            discordUserId: inbound.discordUserId,
+            username: inbound.username,
+            memoryPatch: skillResult.memoryUpdate || {}
+          });
+
+          workflowResult = null;
         } else if (taskType === "image_generation") {
           workflowResult = await salesWorkflowService.createDraftOptions(workflowInput);
         } else if (taskType === "shopify_product_create") {

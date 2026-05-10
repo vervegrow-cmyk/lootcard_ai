@@ -27,7 +27,14 @@ function inferStyle(prompt: string): string {
   if (/(anime card|trading card|动漫卡|动漫卡牌)/.test(text)) {
     return "动漫收藏卡";
   }
+  if (/(头像|portrait|avatar)/.test(text)) {
+    return "角色头像";
+  }
   return "高级卡牌设计";
+}
+
+function buildImagePrompt(message: string): string {
+  return `${message}, high quality illustration, premium composition, detailed lighting, polished finish`.trim();
 }
 
 export class ImageService {
@@ -55,7 +62,7 @@ export class ImageService {
     const model = env("IMAGE_MODEL") || "black-forest-labs/FLUX.1-dev";
     const fallbackModel = env("IMAGE_FALLBACK_MODEL") || "Kwai-Kolors/Kolors";
     console.log(`[IMAGE] model=${model}`);
-    console.log("[IMAGE] generating");
+    console.log("[IMAGE] generating...");
 
     const attempt = async (targetModel: string) => {
       const response = await fetch("https://api.siliconflow.cn/v1/images/generations", {
@@ -91,7 +98,7 @@ export class ImageService {
         fallbackModel !== model &&
         (parsedError?.code === 30003 || /Model disabled/i.test(attemptResult.text))
       ) {
-        console.log(`[IMAGE] model fallback=${fallbackModel}`);
+        console.log(`[IMAGE] fallback model=${fallbackModel}`);
         attemptResult = await attempt(fallbackModel);
       }
 
@@ -121,13 +128,17 @@ export class ImageService {
         imageStyle: styleHint || inferStyle(prompt),
         imageProvider: provider,
         imageModel: attemptResult.model,
-        summary: `${styleHint || inferStyle(prompt)} 设计已生成`
+        summary: `${styleHint || inferStyle(prompt)} design generated`
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`[IMAGE] failed error=${message}`);
       return { ok: false, error: message };
     }
+  }
+
+  async generateDiscordImageFromMessage(message: string): Promise<GeneratedImageResult> {
+    return this.generateImage(buildImagePrompt(message), inferStyle(message));
   }
 
   async generateImages(
@@ -149,7 +160,10 @@ export class ImageService {
     const items: ImageOption[] = [];
 
     for (let index = 0; index < count; index += 1) {
-      const generated = await this.generateImage(`${normalized.prompt}. Variation ${index + 1}`, inferStyle(normalized.prompt));
+      const generated = await this.generateImage(
+        `${normalized.prompt}. Variation ${index + 1}`,
+        inferStyle(normalized.prompt)
+      );
       if (!generated.ok) {
         throw new Error(generated.error || "Image generation failed.");
       }

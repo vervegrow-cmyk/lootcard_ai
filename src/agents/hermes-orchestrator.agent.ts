@@ -125,16 +125,36 @@ function detectRevision(message: string): boolean {
 function detectDirectGenerate(message: string): boolean {
   const lower = message.toLowerCase();
   return (
-    includesAny(lower, ["just generate", "generate now", "don't ask", "no questions"]) ||
-    /\u76f4\u63a5\u51fa\u56fe|\u76f4\u63a5\u751f\u6210|\u4e0d\u8981\u95ee|\u4e0d\u8981\u5e9f\u8bdd|\u5e2e\u6211\u505a\u4e00\u4e2a|\u751f\u6210\u4e00\u4e2a|\u51fa\u56fe/.test(message)
+    includesAny(lower, [
+      "just generate",
+      "generate now",
+      "don't ask",
+      "no questions",
+      "anime",
+      "custom card",
+      "trading card",
+      "generate image",
+      "anime girl card"
+    ]) ||
+    /\u76f4\u63a5\u51fa\u56fe|\u76f4\u63a5\u751f\u6210|\u4e0d\u8981\u95ee|\u4e0d\u8981\u5e9f\u8bdd|\u5e2e\u6211\u505a\u4e00\u4e2a|\u751f\u6210\u4e00\u4e2a|\u51fa\u56fe|\u505a\u4e2a\u56fe|\u505a\u56fe|\u753b\u56fe|\u751f\u6210\u56fe|\u751f\u6210\u56fe\u7247|\u5361\u724c\u8bbe\u8ba1|\u751f\u6210\u5934\u50cf|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u4eba\u9020\u4eba\u5341\u516b|\u5c01\u9762\u56fe|\u751f\u6210\u65b9\u6848/.test(message)
   );
 }
 
 function detectGenerate(message: string): boolean {
   const lower = message.toLowerCase();
   return (
-    includesAny(lower, ["generate", "image", "art", "card"]) ||
-    /\u751f\u6210|\u5361\u724c|\u56fe\u7247|\u56fe\u50cf|\u4eba\u9020\u4eba18|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u6d77\u8d3c\u738b|\u5973\u738b|\u8d5b\u535a\u670b\u514b|\u9ed1\u91d1/.test(message)
+    includesAny(lower, [
+      "generate",
+      "image",
+      "art",
+      "card",
+      "anime",
+      "custom card",
+      "trading card",
+      "generate image",
+      "anime girl card"
+    ]) ||
+    /\u751f\u6210|\u5361\u724c|\u56fe\u7247|\u56fe\u50cf|\u4eba\u9020\u4eba18|\u4eba\u9020\u4eba18\u53f7|\u4eba\u9020\u4eba\u5341\u516b\u53f7|\u4eba\u9020\u4eba\u5341\u516b|\u6d77\u8d3c\u738b|\u5973\u738b|\u8d5b\u535a\u670b\u514b|\u9ed1\u91d1|\u505a\u4e2a\u56fe|\u505a\u56fe|\u753b\u56fe|\u751f\u6210\u56fe|\u751f\u6210\u56fe\u7247|\u5361\u724c\u8bbe\u8ba1|\u751f\u6210\u5934\u50cf|\u5c01\u9762\u56fe|\u751f\u6210\u65b9\u6848/.test(message)
   );
 }
 

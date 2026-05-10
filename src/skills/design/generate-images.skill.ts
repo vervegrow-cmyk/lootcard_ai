@@ -1,8 +1,8 @@
 import { imageService } from "../../services/image.service";
+import { memoryService } from "../../services/memory.service";
+import { promptAgent as legacyPromptAgent } from "../../agents/prompt-agent";
 import { SkillExecutionContext, SkillExecutionResult } from "../../types/skill.types";
 import { generateStyleOptionsSkill } from "./generate-style-options.skill";
-import { promptAgent as legacyPromptAgent } from "../../agents/prompt-agent";
-import { memoryService } from "../../services/memory.service";
 import { collectRequirementsSkill } from "./collect-requirements.skill";
 
 const DEFAULT_STYLE =
@@ -16,10 +16,7 @@ function buildAutoFilledMemory(context: SkillExecutionContext) {
 
   if (
     !autoFilled.character &&
-    (lower.includes("人造人18") ||
-      lower.includes("人造人18号") ||
-      lower.includes("人造人十八号") ||
-      lower.includes("android 18"))
+    (lower.includes("人造人18") || lower.includes("人造人十八") || lower.includes("android 18"))
   ) {
     autoFilled.character = "人造人18号";
   }
@@ -36,6 +33,44 @@ function buildAutoFilledMemory(context: SkillExecutionContext) {
   return autoFilled;
 }
 
+function hasEnoughToGenerate(message: string, effectiveMemory: ReturnType<typeof buildAutoFilledMemory>): boolean {
+  const lower = message.toLowerCase();
+  return (
+    Boolean(effectiveMemory.character || effectiveMemory.theme) &&
+    (Boolean(effectiveMemory.style) ||
+      lower.includes("generate") ||
+      lower.includes("anime") ||
+      lower.includes("custom card") ||
+      lower.includes("trading card") ||
+      /出图|生成图|生成图片|画图|做图|卡牌图|头像|海报|logo|主图|包装图/.test(message))
+  );
+}
+
+function formatSelectionReply(
+  language: "zh" | "en",
+  imageOptions: Array<{ id: string; title: string; prompt: string }>
+): string {
+  if (language === "zh") {
+    return [
+      "✅ 已生成卡牌预览图",
+      "",
+      ...imageOptions.flatMap((option) => [`${option.id}. ${option.title}`, `提示词：${option.prompt}`, ""]),
+      "回复 A / B / C 选择方案，也可以直接说修改意见。"
+    ]
+      .join("\n")
+      .trim();
+  }
+
+  return [
+    "✅ Card previews generated",
+    "",
+    ...imageOptions.flatMap((option) => [`${option.id}. ${option.title}`, `Prompt: ${option.prompt}`, ""]),
+    "Reply with A / B / C to choose one, or tell me what to revise."
+  ]
+    .join("\n")
+    .trim();
+}
+
 export class GenerateImagesSkill {
   async execute(context: SkillExecutionContext): Promise<SkillExecutionResult> {
     const collected = collectRequirementsSkill.execute(context);
@@ -43,15 +78,11 @@ export class GenerateImagesSkill {
       ...context.memory,
       ...(collected.memoryUpdate || {})
     };
-    const lower = context.message.toLowerCase();
     const isDirectGenerate = Boolean(context.data?.directGenerate);
-    const explainImageCapability = Boolean(context.data?.explainImageCapability);
     const userRejectedMoreQuestions = Boolean(context.data?.userRejectedMoreQuestions || collected.data?.shouldStopAsking);
-    const autoFilledMemory = buildAutoFilledMemory({
-      ...context,
-      memory: mergedMemory
-    });
-    const effectiveMemory = isDirectGenerate || userRejectedMoreQuestions ? autoFilledMemory : mergedMemory;
+    const effectiveMemory = isDirectGenerate || userRejectedMoreQuestions
+      ? buildAutoFilledMemory({ ...context, memory: mergedMemory })
+      : mergedMemory;
 
     if (isDirectGenerate || userRejectedMoreQuestions) {
       console.log("[Auto Filled Design Info]", {
@@ -62,18 +93,7 @@ export class GenerateImagesSkill {
       });
     }
 
-    const canGenerate =
-      isDirectGenerate ||
-      userRejectedMoreQuestions ||
-      ((Boolean(effectiveMemory.character || effectiveMemory.theme) ||
-        lower.includes("人造人18") ||
-        lower.includes("人造人18号") ||
-        lower.includes("人造人十八号") ||
-        lower.includes("海贼王") ||
-        lower.includes("女王")) &&
-        (Boolean(effectiveMemory.style) || lower.includes("generate") || lower.includes("出图")));
-
-    if (!canGenerate) {
+    if (!hasEnoughToGenerate(context.message, effectiveMemory)) {
       return {
         reply:
           context.language === "zh"
@@ -105,26 +125,8 @@ export class GenerateImagesSkill {
       }
     });
 
-    let variants = (styleResult.data?.styleVariants as Array<{ id: string; title: string; prompt: string }>) || [];
-    if (isDirectGenerate || userRejectedMoreQuestions) {
-      variants = [
-        {
-          id: "A",
-          title: "动漫SSR收藏卡",
-          prompt: `${prompt.image_prompt}, anime SSR collector card, premium foil finish`
-        },
-        {
-          id: "B",
-          title: "黑金高级角色卡",
-          prompt: `${prompt.image_prompt}, black gold premium character card, luxury border`
-        },
-        {
-          id: "C",
-          title: "赛博战斗角色卡",
-          prompt: `${prompt.image_prompt}, cyber combat character card, neon battle atmosphere`
-        }
-      ];
-    }
+    const variants =
+      (styleResult.data?.styleVariants as Array<{ id: string; title: string; prompt: string }>) || [];
 
     const project =
       context.project || (await memoryService.createProject(context.discordUserId, context.message, prompt.image_prompt));
@@ -134,37 +136,48 @@ export class GenerateImagesSkill {
       currentPrompt: prompt.image_prompt
     });
 
-    const generated = await imageService.generateImages(prompt.image_prompt, 3);
-    const imageOptions = generated.map((option, index) => ({
-      id: variants[index]?.id || option.id,
-      title: variants[index]?.title || option.title,
-      imageUrl: option.imageUrl,
-      prompt: variants[index]?.prompt || option.prompt
-    }));
+    const imageOptions = [];
+    for (const variant of variants) {
+      try {
+        const generated = await imageService.generateImage(variant.prompt, variant.title);
+        if (!generated.ok || !generated.imageUrl) {
+          console.log("[IMAGE] generation failed");
+          continue;
+        }
+
+        imageOptions.push({
+          id: variant.id,
+          title: variant.title,
+          imageUrl: generated.imageUrl,
+          prompt: variant.prompt,
+          summary: generated.summary,
+          style: generated.imageStyle,
+          provider: generated.imageProvider,
+          model: generated.imageModel
+        });
+      } catch {
+        console.log("[IMAGE] generation failed");
+      }
+    }
+
+    if (!imageOptions.length) {
+      return {
+        reply:
+          context.language === "zh"
+            ? "图片生成失败，请稍后重试。"
+            : "Image generation failed. Please try again later.",
+        stage: "generating",
+        actions: ["generate-images"],
+        memoryUpdate: {
+          stage: "generating"
+        }
+      };
+    }
 
     await memoryService.replaceImageOptions(project.projectId, imageOptions);
 
-    const intro =
-      (isDirectGenerate || userRejectedMoreQuestions) && context.language === "zh"
-        ? `好的，我直接按“${effectiveMemory.character || "角色"}角色卡牌”生成 3 个方案：`
-        : (isDirectGenerate || userRejectedMoreQuestions)
-          ? `Got it. I will directly generate 3 options for "${effectiveMemory.character || "the character"} card":`
-          : "";
-
-    const capabilityReply =
-      explainImageCapability && context.language === "zh"
-        ? "我可以进入出图流程。目前如果 MOCK_IMAGE_MODE=true，会先返回模拟图片链接；如果要真实出图，需要接入 OpenAI Images / Replicate / Stable Diffusion。\n\n"
-        : explainImageCapability
-          ? "I can enter the image generation flow. If MOCK_IMAGE_MODE=true, I will return mock image links first. For real image generation, you need to connect OpenAI Images, Replicate, or Stable Diffusion.\n\n"
-          : "";
-
     const result: SkillExecutionResult = {
-      reply:
-        capabilityReply +
-        (intro ||
-          (context.language === "zh"
-            ? "我已经生成 3 个图像方案，你可以选 A/B/C，或者直接说想改哪里。"
-            : "I generated 3 image options. You can choose A/B/C or tell me what to revise.")),
+      reply: formatSelectionReply(context.language, imageOptions),
       stage: "selecting",
       actions: ["generate-images"],
       memoryUpdate: {
