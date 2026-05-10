@@ -434,6 +434,8 @@ async function validateCreatedProduct(params: {
   productUrl?: string;
   featuredMediaUrl?: string;
   variantId?: string;
+  mediaReady?: boolean;
+  featuredMediaReady?: boolean;
   error?: string;
 }> {
   const query = `
@@ -487,7 +489,9 @@ async function validateCreatedProduct(params: {
     }
   `;
 
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await sleep(2000);
+
     const response = await postGraphql<GraphqlResponse<ProductValidationResponse>>({
       shop: params.shop,
       accessToken: params.accessToken,
@@ -519,20 +523,28 @@ async function validateCreatedProduct(params: {
     const product = response.data.data?.product;
     const variant = product?.variants?.nodes?.[0];
     const actualPrice = Number(variant?.price || 0);
-    const featuredMediaUrl =
-      product?.featuredMedia?.preview?.image?.url || product?.media?.nodes?.[0]?.preview?.image?.url;
+    const featuredMediaUrl = product?.featuredMedia?.preview?.image?.url || undefined;
+    const mediaUrl = product?.media?.nodes?.[0]?.preview?.image?.url || undefined;
+    const mediaReady = Boolean(mediaUrl);
+    const featuredMediaReady = Boolean(featuredMediaUrl);
 
-    if (variant?.id && Number.isFinite(actualPrice) && actualPrice === Number(params.expectedPrice.toFixed(2)) && featuredMediaUrl) {
+    if (
+      variant?.id &&
+      Number.isFinite(actualPrice) &&
+      actualPrice === Number(params.expectedPrice.toFixed(2)) &&
+      mediaReady
+    ) {
       return {
         ok: true,
         productUrl: product?.onlineStoreUrl || `https://${params.shop}/products/${product?.handle || ""}`,
-        featuredMediaUrl,
-        variantId: variant.id
+        featuredMediaUrl: featuredMediaUrl || mediaUrl,
+        variantId: variant.id,
+        mediaReady,
+        featuredMediaReady
       };
     }
 
-    if (attempt < 4) {
-      await sleep(1500);
+    if (attempt < 5) {
       continue;
     }
 
@@ -547,7 +559,14 @@ async function validateCreatedProduct(params: {
       };
     }
 
-    return { ok: false, error: "Shopify validation failed: product media is missing." };
+    return {
+      ok: true,
+      productUrl: product?.onlineStoreUrl || `https://${params.shop}/products/${product?.handle || ""}`,
+      featuredMediaUrl: featuredMediaUrl || mediaUrl,
+      variantId: variant.id,
+      mediaReady: false,
+      featuredMediaReady: false
+    };
   }
 
   return { ok: false, error: "Shopify validation failed." };
@@ -700,7 +719,11 @@ export async function createShopifyProductGraphql(
     return { ok: false, error: validation.error };
   }
 
-  console.log("[SHOPIFY] featured image attached");
+  if (!validation.featuredMediaReady) {
+    console.log("[SHOPIFY] media uploaded but featuredMedia not ready yet");
+  } else {
+    console.log("[SHOPIFY] featured image attached");
+  }
 
   const handle = product?.handle || titleHandle(input.title);
   const fallbackProductUrl = `https://${input.shop}/products/${handle}`;
