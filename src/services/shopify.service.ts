@@ -1,6 +1,7 @@
 import { ShippingType, ShopifyProductDraft, ShopifyProductResult } from "../types";
 import { shopifyAuthService } from "./shopify-auth.service";
 import { createShopifyProductGraphql } from "./shopify/createProduct";
+import { storageService } from "./storage.service";
 
 export interface CreateShopifyProductInput {
   title?: string;
@@ -59,6 +60,35 @@ function htmlDescription(input?: string): string {
       "Final design will follow the confirmed Discord conversation."
     ].join("<br><br>")
   );
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function inferSeoTitle(title: string, tags: string[]): string {
+  const normalizedTags = tags.join(" ").toLowerCase();
+  const prefix = normalizedTags.includes("ssr")
+    ? "SSR"
+    : normalizedTags.includes("black-gold") || normalizedTags.includes("黑金")
+      ? "Black Gold"
+      : "Custom";
+
+  return `${prefix} ${title} Trading Card`.replace(/\s+/g, " ").trim();
+}
+
+function inferSeoDescription(params: {
+  title: string;
+  descriptionHtml: string;
+  tags: string[];
+}): string {
+  const baseDescription = stripHtml(params.descriptionHtml);
+  const style = params.tags
+    .filter((tag) => tag && !["discord-order", "custom-card", "lootcard-ai"].includes(tag))
+    .slice(0, 3)
+    .join(", ");
+
+  return `${params.title} by LootCard AI. ${style ? `Style: ${style}. ` : ""}${baseDescription}`.trim();
 }
 
 function discordOrderDescription(input?: string): string {
@@ -134,12 +164,22 @@ export class ShopifyService {
     const description = htmlDescription(input.description);
     const price = input.price ?? defaultPrice();
     const tags = input.tags?.length ? input.tags : defaultTags();
+    const permanentImageUrl = input.imageUrl
+      ? await storageService.ensurePermanentImageUrl(input.imageUrl)
+      : undefined;
+    const seoTitle = input.seoTitle?.trim() || inferSeoTitle(title, tags);
+    const seoDescription = input.seoDescription?.trim() || inferSeoDescription({
+      title,
+      descriptionHtml: description,
+      tags
+    });
 
     console.log("[SHOPIFY] creating product", {
       shop: shopRecord.shop,
       title,
       price,
-      tags
+      tags,
+      permanentImageUrl
     });
 
     try {
@@ -154,9 +194,9 @@ export class ShopifyService {
         vendor: input.vendor,
         productType: input.productType,
         sku: input.sku,
-        imageUrl: input.imageUrl,
-        seoTitle: input.seoTitle,
-        seoDescription: input.seoDescription,
+        imageUrl: permanentImageUrl,
+        seoTitle,
+        seoDescription,
         shippingType: input.shippingType,
         inventoryQuantity: input.inventoryQuantity
       });
