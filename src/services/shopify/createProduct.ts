@@ -31,6 +31,8 @@ export interface ShopifyGraphqlCreateProductResult {
   error?: string;
 }
 
+export type ShopifyRestCreateProductResult = ShopifyGraphqlCreateProductResult;
+
 interface GraphqlResponse<TData> {
   data?: TData;
   errors?: Array<{ message?: string }>;
@@ -46,10 +48,15 @@ interface ProductCreateResponse {
       variants?: {
         nodes?: Array<{
           id?: string;
-          price?: string;
-          sku?: string;
+          price?: string | null;
           inventoryPolicy?: string | null;
           availableForSale?: boolean | null;
+          inventoryItem?: {
+            id?: string;
+            sku?: string | null;
+            tracked?: boolean | null;
+            requiresShipping?: boolean | null;
+          } | null;
         }>;
       };
     };
@@ -89,9 +96,14 @@ interface ProductValidationResponse {
       nodes?: Array<{
         id?: string;
         price?: string | null;
-        sku?: string | null;
         inventoryPolicy?: string | null;
         availableForSale?: boolean | null;
+        inventoryItem?: {
+          id?: string;
+          sku?: string | null;
+          tracked?: boolean | null;
+          requiresShipping?: boolean | null;
+        } | null;
       }>;
     };
   } | null;
@@ -115,7 +127,12 @@ function buildCartLink(shop: string, variantId?: string): string | undefined {
   if (!numericVariantId) {
     return undefined;
   }
+
   return `https://${shop}/cart/${numericVariantId}:1`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function postGraphql<TData>(params: {
@@ -151,8 +168,9 @@ async function postGraphql<TData>(params: {
 }
 
 function collectGraphqlErrors(response?: GraphqlResponse<unknown>): string[] {
-  const errors = response?.errors || [];
-  return errors.map((item) => item.message || "Unknown GraphQL error").filter(Boolean);
+  return (response?.errors || [])
+    .map((item) => item.message || "Unknown GraphQL error")
+    .filter(Boolean);
 }
 
 async function checkImageReachable(imageUrl: string): Promise<{ ok: boolean; error?: string }> {
@@ -166,6 +184,7 @@ async function checkImageReachable(imageUrl: string): Promise<{ ok: boolean; err
         error: "图片链接已失效，请重新生成图片。"
       };
     }
+
     return { ok: true };
   } catch (error) {
     console.log("[SHOPIFY] image reachable check status=0");
@@ -253,6 +272,7 @@ async function uploadProductMedia(params: {
 
   const mediaId = response.data.data?.productCreateMedia?.media?.[0]?.id;
   console.log(`[SHOPIFY] media upload success mediaId=${mediaId || ""}`);
+  console.log("[SHOPIFY] media uploaded");
   return { ok: true, mediaId };
 }
 
@@ -264,6 +284,7 @@ async function updateVariantPricing(params: {
   variantId: string;
   price: number;
   sku: string;
+  requiresShipping: boolean;
 }): Promise<{ ok: boolean; error?: string }> {
   const mutation = `
     mutation UpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -273,6 +294,12 @@ async function updateVariantPricing(params: {
           price
           inventoryPolicy
           taxable
+          inventoryItem {
+            id
+            sku
+            tracked
+            requiresShipping
+          }
         }
         userErrors {
           field
@@ -300,9 +327,13 @@ async function updateVariantPricing(params: {
         {
           id: params.variantId,
           price: params.price.toFixed(2),
-          sku: params.sku,
           inventoryPolicy: "CONTINUE",
-          taxable: false
+          taxable: false,
+          inventoryItem: {
+            sku: params.sku,
+            tracked: false,
+            requiresShipping: params.requiresShipping
+          }
         }
       ]
     }
@@ -327,6 +358,7 @@ async function updateVariantPricing(params: {
 
   console.log(`[SHOPIFY] variant price set price=${params.price.toFixed(2)}`);
   console.log(`[SHOPIFY] variantId=${params.variantId}`);
+  console.log("[SHOPIFY] variant created");
   return { ok: true };
 }
 
@@ -441,62 +473,84 @@ async function validateCreatedProduct(params: {
           nodes {
             id
             price
-            sku
             inventoryPolicy
             availableForSale
+            inventoryItem {
+              id
+              sku
+              tracked
+              requiresShipping
+            }
           }
         }
       }
     }
   `;
 
-  const response = await postGraphql<GraphqlResponse<ProductValidationResponse>>({
-    shop: params.shop,
-    accessToken: params.accessToken,
-    apiVersion: params.apiVersion,
-    query,
-    variables: { id: params.productId }
-  });
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const response = await postGraphql<GraphqlResponse<ProductValidationResponse>>({
+      shop: params.shop,
+      accessToken: params.accessToken,
+      apiVersion: params.apiVersion,
+      query,
+      variables: { id: params.productId }
+    });
 
-  if (!response.ok || !response.data) {
-    return {
-      ok: false,
-      error: `Shopify validation query failed: ${response.status} ${response.text}`
-    };
-  }
+    if (!response.ok || !response.data) {
+      if (attempt === 4) {
+        return {
+          ok: false,
+          error: `Shopify validation query failed: ${response.status} ${response.text}`
+        };
+      }
+      await sleep(1500);
+      continue;
+    }
 
-  const errors = collectGraphqlErrors(response.data);
-  if (errors.length) {
-    return { ok: false, error: errors.join("; ") };
-  }
+    const errors = collectGraphqlErrors(response.data);
+    if (errors.length) {
+      if (attempt === 4) {
+        return { ok: false, error: errors.join("; ") };
+      }
+      await sleep(1500);
+      continue;
+    }
 
-  const product = response.data.data?.product;
-  const variant = product?.variants?.nodes?.[0];
-  const actualPrice = Number(variant?.price || 0);
-  const featuredMediaUrl =
-    product?.featuredMedia?.preview?.image?.url || product?.media?.nodes?.[0]?.preview?.image?.url;
+    const product = response.data.data?.product;
+    const variant = product?.variants?.nodes?.[0];
+    const actualPrice = Number(variant?.price || 0);
+    const featuredMediaUrl =
+      product?.featuredMedia?.preview?.image?.url || product?.media?.nodes?.[0]?.preview?.image?.url;
 
-  if (!variant?.id) {
-    return { ok: false, error: "Shopify validation failed: product variant was not created." };
-  }
+    if (variant?.id && Number.isFinite(actualPrice) && actualPrice === Number(params.expectedPrice.toFixed(2)) && featuredMediaUrl) {
+      return {
+        ok: true,
+        productUrl: product?.onlineStoreUrl || `https://${params.shop}/products/${product?.handle || ""}`,
+        featuredMediaUrl,
+        variantId: variant.id
+      };
+    }
 
-  if (!Number.isFinite(actualPrice) || actualPrice !== Number(params.expectedPrice.toFixed(2))) {
-    return {
-      ok: false,
-      error: `Shopify validation failed: variant price is ${variant?.price || "0.00"}, expected ${params.expectedPrice.toFixed(2)}.`
-    };
-  }
+    if (attempt < 4) {
+      await sleep(1500);
+      continue;
+    }
 
-  if (!featuredMediaUrl) {
+    if (!variant?.id) {
+      return { ok: false, error: "Shopify validation failed: product variant was not created." };
+    }
+
+    if (!Number.isFinite(actualPrice) || actualPrice !== Number(params.expectedPrice.toFixed(2))) {
+      return {
+        ok: false,
+        error: `Shopify validation failed: variant price is ${variant?.price || "0.00"}, expected ${params.expectedPrice.toFixed(2)}.`
+      };
+    }
+
     return { ok: false, error: "Shopify validation failed: product media is missing." };
   }
 
-  return {
-    ok: true,
-    productUrl: product?.onlineStoreUrl || `https://${params.shop}/products/${product?.handle || ""}`,
-    featuredMediaUrl,
-    variantId: variant.id
-  };
+  return { ok: false, error: "Shopify validation failed." };
 }
 
 export async function createShopifyProductGraphql(
@@ -508,6 +562,8 @@ export async function createShopifyProductGraphql(
       error: "缺少卡牌图，请先生成图片。"
     };
   }
+
+  console.log("[SHOPIFY] product create start");
 
   const imageReachable = await checkImageReachable(input.imageUrl);
   if (!imageReachable.ok) {
@@ -529,9 +585,14 @@ export async function createShopifyProductGraphql(
             nodes {
               id
               price
-              sku
               inventoryPolicy
               availableForSale
+              inventoryItem {
+                id
+                sku
+                tracked
+                requiresShipping
+              }
             }
           }
         }
@@ -586,7 +647,10 @@ export async function createShopifyProductGraphql(
   const initialVariantId = product?.variants?.nodes?.[0]?.id || "";
 
   if (!productId || !initialVariantId) {
-    return { ok: false, error: "Shopify product creation failed: missing product or variant id." };
+    return {
+      ok: false,
+      error: "Shopify product creation failed: missing product or variant id."
+    };
   }
 
   const variantUpdate = await updateVariantPricing({
@@ -596,7 +660,8 @@ export async function createShopifyProductGraphql(
     productId,
     variantId: initialVariantId,
     price: input.price,
-    sku: input.sku || `DISCORD-${Date.now()}`
+    sku: input.sku || `DISCORD-${Date.now()}`,
+    requiresShipping: input.shippingType !== "digital_download"
   });
 
   if (!variantUpdate.ok) {
@@ -635,10 +700,13 @@ export async function createShopifyProductGraphql(
     return { ok: false, error: validation.error };
   }
 
+  console.log("[SHOPIFY] featured image attached");
+
   const handle = product?.handle || titleHandle(input.title);
   const fallbackProductUrl = `https://${input.shop}/products/${handle}`;
   const cartLink = buildCartLink(input.shop, validation.variantId);
-  const productUrl = cartLink || validation.productUrl || fallbackProductUrl;
+  const productUrl = validation.productUrl || fallbackProductUrl;
+  const checkoutUrl = cartLink || productUrl;
   const adminNumericId = asNumericId(productId);
   const adminStoreSlug = input.shop.replace(/\.myshopify\.com$/i, "");
   const adminUrl = adminNumericId
@@ -646,6 +714,7 @@ export async function createShopifyProductGraphql(
     : `https://${input.shop}/admin/products`;
 
   console.log(`[SHOPIFY] productUrl=${productUrl}`);
+  console.log(`[SHOPIFY] checkout url generated ${checkoutUrl}`);
   if (cartLink) {
     console.log("[SHOPIFY] product page price mismatch possible theme issue");
   }
@@ -656,7 +725,128 @@ export async function createShopifyProductGraphql(
     variantId: validation.variantId || initialVariantId,
     handle,
     productUrl,
-    checkoutUrl: productUrl,
+    checkoutUrl,
+    adminUrl,
+    price: input.price,
+    title: input.title
+  };
+}
+
+export async function createShopifyProductRest(
+  input: ShopifyGraphqlCreateProductInput
+): Promise<ShopifyRestCreateProductResult> {
+  if (!input.imageUrl) {
+    return {
+      ok: false,
+      error: "缺少卡牌图，请先生成图片。"
+    };
+  }
+
+  console.log("[SHOPIFY] product create start");
+
+  const imageReachable = await checkImageReachable(input.imageUrl);
+  if (!imageReachable.ok) {
+    return {
+      ok: false,
+      error: imageReachable.error || "图片链接已失效，请重新生成图片。"
+    };
+  }
+
+  const response = await fetch(`https://${input.shop}/admin/api/${input.apiVersion}/products.json`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Shopify-Access-Token": input.accessToken
+    },
+    body: JSON.stringify({
+      product: {
+        title: input.title,
+        body_html: input.descriptionHtml,
+        vendor: input.vendor || "LootCard AI",
+        product_type: input.productType || "Custom AI Trading Card",
+        status: "active",
+        tags: input.tags.join(", "),
+        variants: [
+          {
+            price: input.price.toFixed(2),
+            sku: input.sku || `DISCORD-${Date.now()}`,
+            inventory_policy: "continue",
+            taxable: false,
+            requires_shipping: input.shippingType !== "digital_download"
+          }
+        ],
+        images: [
+          {
+            src: input.imageUrl,
+            alt: input.title
+          }
+        ],
+        metafields_global_title_tag: input.seoTitle || input.title,
+        metafields_global_description_tag: input.seoDescription || input.title
+      }
+    })
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    return {
+      ok: false,
+      error: `Shopify REST create product failed: ${response.status} ${text}`
+    };
+  }
+
+  const parsed = JSON.parse(text) as {
+    product?: {
+      id?: number;
+      title?: string;
+      handle?: string;
+      variants?: Array<{ id?: number; price?: string }>;
+      image?: { src?: string | null } | null;
+      images?: Array<{ src?: string | null }>;
+    };
+  };
+
+  const product = parsed.product;
+  const variant = product?.variants?.[0];
+  const actualPrice = Number(variant?.price || 0);
+  const featuredImage = product?.image?.src || product?.images?.[0]?.src || "";
+
+  if (!product?.id || !variant?.id) {
+    return { ok: false, error: "Shopify REST validation failed: missing product or variant." };
+  }
+
+  if (!Number.isFinite(actualPrice) || actualPrice !== Number(input.price.toFixed(2))) {
+    return {
+      ok: false,
+      error: `Shopify REST validation failed: variant price is ${variant?.price || "0.00"}, expected ${input.price.toFixed(2)}.`
+    };
+  }
+
+  if (!featuredImage) {
+    return { ok: false, error: "Shopify REST validation failed: product media is missing." };
+  }
+
+  console.log(`[SHOPIFY] variant price set price=${input.price.toFixed(2)}`);
+  console.log(`[SHOPIFY] variantId=${variant.id}`);
+  console.log("[SHOPIFY] variant created");
+  console.log("[SHOPIFY] media uploaded");
+  console.log("[SHOPIFY] featured image attached");
+
+  const productUrl = `https://${input.shop}/products/${product.handle || titleHandle(input.title)}`;
+  const checkoutUrl = `https://${input.shop}/cart/${variant.id}:1`;
+  const adminStoreSlug = input.shop.replace(/\.myshopify\.com$/i, "");
+  const adminUrl = `https://admin.shopify.com/store/${adminStoreSlug}/products/${product.id}`;
+
+  console.log(`[SHOPIFY] productUrl=${productUrl}`);
+  console.log(`[SHOPIFY] checkout url generated ${checkoutUrl}`);
+
+  return {
+    ok: true,
+    productId: String(product.id),
+    variantId: String(variant.id),
+    handle: product.handle || titleHandle(input.title),
+    productUrl,
+    checkoutUrl,
     adminUrl,
     price: input.price,
     title: input.title

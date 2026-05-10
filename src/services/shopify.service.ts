@@ -1,6 +1,6 @@
 import { ShippingType, ShopifyProductDraft, ShopifyProductResult } from "../types";
 import { shopifyAuthService } from "./shopify-auth.service";
-import { createShopifyProductGraphql } from "./shopify/createProduct";
+import { createShopifyProductGraphql, createShopifyProductRest } from "./shopify/createProduct";
 import { storageService } from "./storage.service";
 
 export interface CreateShopifyProductInput {
@@ -160,6 +160,16 @@ function discordOrderDescription(input?: string): string {
   );
 }
 
+function shouldUseRestFallback(error?: string): boolean {
+  const message = (error || "").toLowerCase();
+  return (
+    message.includes("field is not defined") ||
+    message.includes("unknown argument") ||
+    message.includes("cannot query field") ||
+    message.includes("productvariantsbulkinput")
+  );
+}
+
 export function isShopifyConfigured(): boolean {
   return shopifyAuthService.isOAuthConfigured();
 }
@@ -248,7 +258,7 @@ export class ShopifyService {
       price
     });
 
-    console.log("[SHOPIFY] creating product", {
+    console.log("[SHOPIFY] product create start", {
       shop: shopRecord.shop,
       title,
       price,
@@ -284,6 +294,38 @@ export class ShopifyService {
           error: `Shopify token is no longer valid for ${shopRecord.shop}. Reauthorization is required.`
         };
       }
+
+      if (!created.ok && shouldUseRestFallback(created.error)) {
+        console.log("[SHOPIFY] falling back to REST product create");
+        const restCreated = await createShopifyProductRest({
+          shop: shopRecord.shop,
+          accessToken: tokenContext.accessToken,
+          apiVersion: shopifyApiVersion(),
+          title,
+          descriptionHtml: description,
+          price,
+          tags,
+          vendor: input.vendor,
+          productType: input.productType,
+          sku: input.sku,
+          imageUrl: finalImageUrl,
+          seoTitle,
+          seoDescription,
+          shippingType: input.shippingType,
+          inventoryQuantity: input.inventoryQuantity
+        });
+
+        if (restCreated.productUrl) {
+          console.log("[Shopify Product URL]", restCreated.productUrl);
+        }
+        console.log("[SHOPIFY] product created", restCreated);
+        console.log("[Shopify Product Create Result]", restCreated);
+        return {
+          ...restCreated,
+          shop: shopRecord.shop
+        };
+      }
+
       if (created.productUrl) {
         console.log("[Shopify Product URL]", created.productUrl);
       }
