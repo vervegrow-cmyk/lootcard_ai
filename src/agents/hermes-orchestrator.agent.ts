@@ -158,6 +158,23 @@ function detectGenerate(message: string): boolean {
   );
 }
 
+function detectNewOrderStart(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    includesAny(lower, [
+      "want a new",
+      "new product",
+      "new card",
+      "beautiful girl card",
+      "girl card",
+      "anime card",
+      "custom card",
+      "trading card"
+    ]) ||
+    /\u65b0\u7684\u5361|\u518d\u6765\u4e00\u5355|\u5e2e\u6211\u505a\u4e00\u5f20|\u6211\u8981\u5b9a\u5236\u5361\u724c|\u7f8e\u5973\u5361\u724c|\u52a8\u6f2b\u5361\u724c/.test(message)
+  );
+}
+
 function detectPromptPolish(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -347,6 +364,23 @@ export class HermesOrchestratorAgent {
             ? "The user wants card design options. Introduce the 3 generated options naturally in Chinese and invite A/B/C or revisions."
             : "The user wants card design options. Introduce the 3 generated options naturally and invite the user to choose A/B/C or request revisions.",
         reason: "design or image generation keywords detected"
+      });
+    }
+
+    if (detectNewOrderStart(input.message)) {
+      return basePlan({
+        intent: "generate_images",
+        targetAgent: "design",
+        targetSkill: "generate-images",
+        action: "generate_images",
+        language,
+        stage: "generating",
+        memoryUpdate: { language },
+        replyInstruction:
+          language === "zh"
+            ? "The user is starting a new custom card request. Introduce the new design flow naturally in Chinese and move into card option generation."
+            : "The user is starting a new custom card request. Treat this as a fresh AI card order and move into generating card options instead of answering as general chat.",
+        reason: "new ai card order request detected"
       });
     }
 

@@ -270,7 +270,8 @@ export class DiscordBot {
 
         let workflowResult;
         const draft = restoredDraft;
-        console.log(`[ORDER_FLOW] stage=${draft?.stage || snapshot.memory.currentStage || "idle"}`);
+        const activeStage = draft?.stage || (flowMode !== "IDLE" ? snapshot.memory.currentStage : "idle");
+        console.log(`[ORDER_FLOW] stage=${activeStage || "idle"}`);
 
         if (isOrderQuery(inbound.content)) {
           finalReply = await formatRecentOrders(inbound.discordUserId);
