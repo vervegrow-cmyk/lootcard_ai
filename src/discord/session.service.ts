@@ -22,11 +22,20 @@ export class SessionService {
   detectLanguageSwitch(message: string): LanguagePreference | null {
     const lower = message.toLowerCase();
 
-    if (/我要英文回复|请用英文回复|英文回复/.test(message) || lower.includes("english please") || lower.includes("reply in english") || lower.includes("use english")) {
+    if (
+      /我要英文回复|请用英文回复|英文回复/.test(message) ||
+      lower.includes("english please") ||
+      lower.includes("reply in english") ||
+      lower.includes("use english")
+    ) {
       return "en";
     }
 
-    if (/我要中文回复|请用中文回复|中文回复/.test(message) || lower.includes("use chinese") || lower.includes("reply in chinese")) {
+    if (
+      /我要中文回复|请用中文回复|中文回复/.test(message) ||
+      lower.includes("use chinese") ||
+      lower.includes("reply in chinese")
+    ) {
       return "zh";
     }
 
@@ -58,14 +67,14 @@ export class SessionService {
 
   isResetRequest(message: string): boolean {
     const lower = message.trim().toLowerCase();
-    return /取消|重新开始|新卡牌/.test(message) || lower === "cancel" || lower === "exit" || lower === "reset" || lower === "start over";
+    return /取消|重新开始|重置|退出/.test(message) || lower === "cancel" || lower === "exit" || lower === "reset" || lower === "start over";
   }
 
   isNewRequestWhileLocked(message: string): boolean {
     const lower = message.trim().toLowerCase();
 
     return (
-      /给我|新卡牌|美女卡牌|黑金SSR|10张|我要英文回复/.test(message) ||
+      /给我|新卡牌|美女卡牌|黑金SSR|10张|女角色卡牌|我要英文回复/.test(message) ||
       lower.includes("start over") ||
       lower.includes("i want") ||
       lower.includes("create") ||

@@ -75,7 +75,7 @@ function isCheckoutLink(text: string): boolean {
 
 function isProductLink(text: string): boolean {
   const normalized = text.trim().toLowerCase();
-  return hasAny(normalized, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接"]);
+  return hasAny(normalized, ["产品链接", "商品链接", "产品页面", "发我链接", "我要产品链接", "product link"]);
 }
 
 function detectSelection(text: string, draft?: CurrentOrderDraft | null): "A" | "B" | "C" | null {
