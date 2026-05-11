@@ -33,30 +33,57 @@ export class SessionService {
     return null;
   }
 
+  detectMessageLanguage(message: string): LanguagePreference {
+    const lower = message.trim().toLowerCase();
+
+    if (/[\u4e00-\u9fff]/.test(message)) {
+      return "zh";
+    }
+
+    if (
+      /^(hello|hi|hey)\b/.test(lower) ||
+      /\bi want\b/.test(lower) ||
+      /\bnew card\b/.test(lower) ||
+      /\bbeautiful girl card\b/.test(lower) ||
+      /\bcancel\b/.test(lower) ||
+      /\bpayment link\b/.test(lower) ||
+      /\bproduct link\b/.test(lower) ||
+      /[a-z]/i.test(message)
+    ) {
+      return "en";
+    }
+
+    return "en";
+  }
+
   isResetRequest(message: string): boolean {
     const lower = message.trim().toLowerCase();
-    return (
-      /取消|重新开始|新卡牌/.test(message) ||
-      lower === "cancel" ||
-      lower === "exit" ||
-      lower === "reset" ||
-      lower === "start over"
-    );
+    return /取消|重新开始|新卡牌/.test(message) || lower === "cancel" || lower === "exit" || lower === "reset" || lower === "start over";
   }
 
   isNewRequestWhileLocked(message: string): boolean {
     const lower = message.trim().toLowerCase();
+
     return (
-      /新卡牌|我要英文回复/.test(message) ||
+      /给我|新卡牌|美女卡牌|黑金SSR|10张|我要英文回复/.test(message) ||
       lower.includes("start over") ||
+      lower.includes("i want") ||
+      lower.includes("create") ||
+      lower.includes("generate") ||
       lower.includes("new card") ||
       lower.includes("beautiful girl card") ||
+      lower.includes("sexy girl card") ||
+      lower.includes("goddess card") ||
+      lower.includes("waifu card") ||
+      lower.includes("girl card") ||
       lower.includes("anime card") ||
       lower.includes("custom trading card") ||
       lower.includes("i want a new") ||
       lower.includes("make me a") ||
       lower.includes("give me a card picture") ||
-      lower.includes("i want a card design")
+      lower.includes("i want a card design") ||
+      lower.includes("black gold ssr") ||
+      /\b10\b/.test(lower)
     );
   }
 

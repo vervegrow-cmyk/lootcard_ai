@@ -114,7 +114,8 @@ export class MessageRouter {
       }
 
       if (sessionService.isNewRequestWhileLocked(message)) {
-        console.log("[SESSION] reset by user");
+        console.log("[SESSION] new card request overrides current flow");
+        console.log("[SESSION] reset current draft");
         return { flowMode: "IDLE", action: "reset_and_restart", handledByFlow: true };
       }
 
