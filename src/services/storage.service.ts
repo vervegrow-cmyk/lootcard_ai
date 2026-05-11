@@ -13,6 +13,10 @@ function sha1(value: string): string {
 }
 
 export class StorageService {
+  isTemporaryImageUrl(url?: string): boolean {
+    return Boolean(url && isTemporarySiliconFlowUrl(url));
+  }
+
   async downloadImageAsset(url: string): Promise<{
     attachment: string;
     fileName: string;
@@ -123,6 +127,7 @@ export class StorageService {
       throw new Error("CDN upload succeeded but no secure_url was returned.");
     }
 
+    console.log(`[STORAGE] upload success publicImageUrl=${parsed.secure_url}`);
     return parsed.secure_url;
   }
 
@@ -133,8 +138,7 @@ export class StorageService {
 
     if (isTemporarySiliconFlowUrl(url)) {
       if (!this.isConfigured()) {
-        console.log("[STORAGE] temporary image url used");
-        return url;
+        throw new Error(`Permanent image storage is not configured. Missing: ${this.getMissingEnv().join(", ")}`);
       }
       return this.uploadImageFromUrl(url);
     }

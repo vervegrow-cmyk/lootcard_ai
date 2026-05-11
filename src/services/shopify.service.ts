@@ -455,10 +455,27 @@ export class ShopifyService {
     const baseDescription = htmlDescription(input.description);
     const price = input.price ?? defaultPrice();
     const tags = input.tags?.length ? input.tags : defaultTags();
-    const permanentImageUrl = input.imageUrl
-      ? await storageService.ensurePermanentImageUrl(input.imageUrl)
-      : undefined;
-    const finalImageUrl = permanentImageUrl || input.imageUrl.trim();
+    let permanentImageUrl: string | undefined;
+    try {
+      permanentImageUrl = input.imageUrl
+        ? await storageService.ensurePermanentImageUrl(input.imageUrl)
+        : undefined;
+    } catch (error) {
+      return {
+        ok: false,
+        shop: shopRecord.shop,
+        error: error instanceof Error ? error.message : "Failed to prepare permanent product image."
+      };
+    }
+    const finalImageUrl = permanentImageUrl?.trim();
+    if (!finalImageUrl) {
+      return {
+        ok: false,
+        shop: shopRecord.shop,
+        error: "Missing permanent card image. Please generate the card image again."
+      };
+    }
+    console.log(`[SHOPIFY IMAGE] using permanentImageUrl=${finalImageUrl}`);
     const description = buildMarketingDescriptionHtml({
       title,
       descriptionHtml: baseDescription,

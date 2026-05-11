@@ -245,34 +245,6 @@ export class DiscordBot {
           aiRoute
         });
 
-        console.log("[AGENT] route start");
-        const plan = hermesOrchestratorAgent.plan({
-          discordUserId: inbound.discordUserId,
-          username: inbound.username,
-          message: inbound.content,
-          memory: {
-            ...snapshot.memory,
-            language,
-            currentOrderDraft: restoredDraft,
-            currentProject: project?.projectId || "",
-            imageOptions:
-              restoredDraft?.options.map((option) => ({
-                id: option.id,
-                title: option.title,
-                imageUrl: "",
-                prompt: option.prompt,
-                summary: option.description,
-                style: option.style
-              })) || []
-          },
-          recentConversation
-        });
-        console.log("[AGENT] route result", {
-          intent: plan.intent,
-          targetAgent: taskType === "image_generation" ? aiRoute.targetAgent : plan.targetAgent,
-          targetSkill: taskType === "image_generation" ? aiRoute.targetSkill : plan.targetSkill
-        });
-
         console.log(`[AI ROUTER] taskType=${taskType}`);
         console.log(`[SESSION] flowMode=${flowMode}`);
         if (persistedDraft && !restoredDraft) {
@@ -297,6 +269,8 @@ export class DiscordBot {
         const draft = restoredDraft;
         const activeStage = draft?.stage || (flowMode !== "IDLE" ? snapshot.memory.currentStage : "idle");
         console.log(`[ORDER_FLOW] stage=${activeStage || "idle"}`);
+
+        let plan: ReturnType<typeof hermesOrchestratorAgent.plan> | null = null;
 
         if (isOrderQuery(inbound.content)) {
           finalReply = await formatRecentOrders(inbound.discordUserId);
@@ -383,7 +357,37 @@ export class DiscordBot {
               workflowResult = null;
               break;
           }
-        } else if (taskType === "image_generation" && !draft) {
+        } else {
+          console.log("[AGENT] route start");
+          plan = hermesOrchestratorAgent.plan({
+            discordUserId: inbound.discordUserId,
+            username: inbound.username,
+            message: inbound.content,
+            memory: {
+              ...snapshot.memory,
+              language,
+              currentOrderDraft: restoredDraft,
+              currentProject: project?.projectId || "",
+              imageOptions:
+                restoredDraft?.options.map((option) => ({
+                  id: option.id,
+                  title: option.title,
+                  imageUrl: "",
+                  prompt: option.prompt,
+                  summary: option.description,
+                  style: option.style
+                })) || []
+            },
+            recentConversation
+          });
+          console.log("[AGENT] route result", {
+            intent: plan.intent,
+            targetAgent: taskType === "image_generation" ? aiRoute.targetAgent : plan.targetAgent,
+            targetSkill: taskType === "image_generation" ? aiRoute.targetSkill : plan.targetSkill
+          });
+        }
+
+        if (!flowRoute.handledByFlow && taskType === "image_generation" && !draft && plan) {
           const skillMemory = {
             ...((snapshot.memory as unknown) as Record<string, unknown>),
             currentOrderDraft: restoredDraft
@@ -414,10 +418,10 @@ export class DiscordBot {
           });
 
           workflowResult = null;
-        } else if (taskType === "shopify_product_create") {
+        } else if (!flowRoute.handledByFlow && taskType === "shopify_product_create") {
           const requestedLinkType = stateManagerService.wantsCheckoutLink(inbound.content) ? "checkout" : "product";
           workflowResult = await salesWorkflowService.createOrderLink(workflowInput, requestedLinkType);
-        } else {
+        } else if (!flowRoute.handledByFlow) {
           workflowResult = await salesWorkflowService.answerGeneralQuestion(workflowInput);
         }
 

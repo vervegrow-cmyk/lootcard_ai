@@ -1,3 +1,4 @@
+import { OrderStatus } from "@prisma/client";
 import {
   ConversationEntry,
   CurrentOrderDraft,
@@ -14,6 +15,7 @@ import { memoryService } from "./memory.service";
 import { openRouterService } from "./openrouter.service";
 import { orderService } from "./order.service";
 import { stateManagerService } from "./state-manager.service";
+import { storageService } from "./storage.service";
 import { shopifyService } from "./shopify.service";
 
 export interface WorkflowResponse {
@@ -66,7 +68,7 @@ function buildDescription(option: OrderDraftOption, originalMessage: string, lan
       `<p>风格：${option.style}</p>`,
       `<p>工艺：${inferCraft(option.style, language)}</p>`,
       `<p>用户需求：${originalMessage}</p>`,
-      "<p>发货说明：定制商品预计 30 天左右制作并发货。</p>",
+      "<p>发货说明：定制商品预计约 30 天制作并发货。</p>",
       "<p>定制说明：最终成品将按照当前确认方案生产。</p>"
     ].join("");
   }
@@ -174,11 +176,50 @@ function stampDraft(draft: CurrentOrderDraft, language: LanguagePreference): Cur
   };
 }
 
+async function persistPermanentImageOrFail(params: {
+  input: WorkflowInput;
+  tempImageUrl?: string;
+  failureStage: ProjectStage;
+}): Promise<{ ok: true; permanentImageUrl: string } | { ok: false; response: WorkflowResponse }> {
+  const { input, tempImageUrl, failureStage } = params;
+
+  if (!tempImageUrl) {
+    return {
+      ok: false,
+      response: {
+        reply: t(input.language, "图片生成失败：未返回图片链接。", "Image generation failed: no image URL was returned."),
+        stage: failureStage,
+        memoryPatch: { language: input.language }
+      }
+    };
+  }
+
+  try {
+    const permanentImageUrl = await storageService.uploadImageFromUrl(tempImageUrl);
+    return { ok: true, permanentImageUrl };
+  } catch (error) {
+    return {
+      ok: false,
+      response: {
+        reply: t(
+          input.language,
+          `图片已生成，但永久存储失败：${error instanceof Error ? error.message : "未知错误"}。请重试后再创建商品。`,
+          `The preview was generated, but permanent storage failed: ${error instanceof Error ? error.message : "Unknown error"}. Please retry before creating a product link.`
+        ),
+        stage: failureStage,
+        imageUrls: tempImageUrl ? [tempImageUrl] : [],
+        memoryPatch: { language: input.language }
+      }
+    };
+  }
+}
+
 export class SalesWorkflowService {
   async createDraftOptions(input: WorkflowInput): Promise<WorkflowResponse> {
     const shippingType = stateManagerService.inferShippingType(input.message, input.memory);
     console.log(`[LANGUAGE] detected=${input.language}`);
     console.log(`[CONCEPT] using ${input.language} templates`);
+
     const options = buildConceptOptions(input.message, input.language, shippingType);
     const project = await maybeCreateProject(input, options[0].prompt);
     const order =
@@ -202,6 +243,7 @@ export class SalesWorkflowService {
         style: option.style
       }))
     );
+
     await memoryService.updateProject(project.projectId, {
       status: "draft_design",
       currentPrompt: options[0].prompt,
@@ -209,21 +251,24 @@ export class SalesWorkflowService {
     });
     await orderService.saveDraftOptions(order.id, options);
 
-    const currentOrderDraft: CurrentOrderDraft = stampDraft({
-      orderId: order.id,
-      orderNo: order.orderNo,
-      discordUserId: input.discordUserId,
-      stage: "draft_options",
-      originalMessage: input.message,
-      options,
-      selectedOption: null,
-      imageUrl: "",
-      productTitle: "",
-      productDescription: "",
-      price: "",
-      shippingType,
-      shopifyProductUrl: ""
-    }, input.language);
+    const currentOrderDraft = stampDraft(
+      {
+        orderId: order.id,
+        orderNo: order.orderNo,
+        discordUserId: input.discordUserId,
+        stage: "draft_options",
+        originalMessage: input.message,
+        options,
+        selectedOption: null,
+        imageUrl: "",
+        productTitle: "",
+        productDescription: "",
+        price: "",
+        shippingType,
+        shopifyProductUrl: ""
+      },
+      input.language
+    );
 
     console.log("[SESSION] set flowMode=AI_CARD_ORDER");
     console.log("[ORDER_FLOW] stage=draft_options");
@@ -270,6 +315,15 @@ export class SalesWorkflowService {
       };
     }
 
+    const persisted = await persistPermanentImageOrFail({
+      input,
+      tempImageUrl: generated.imageUrl,
+      failureStage: "draft_design"
+    });
+    if (!persisted.ok) {
+      return persisted.response;
+    }
+
     if (input.project?.projectId) {
       await memoryService.updateProject(input.project.projectId, {
         status: "waiting_confirmation",
@@ -277,14 +331,26 @@ export class SalesWorkflowService {
         finalDesignSummary: selectedOption.style
       });
     }
+
     if (draft.orderId) {
-      await orderService.attachGeneratedImage(draft.orderId, generated.imageUrl || "", selectedOption.prompt);
+      const currentOrder = await orderService.getOrderById(draft.orderId);
+      await orderService.attachGeneratedImage(draft.orderId, persisted.permanentImageUrl, selectedOption.prompt);
+      await orderService.updateOrderStatus(draft.orderId, OrderStatus.WAITING_CONFIRMATION, {
+        metadata: {
+          ...((currentOrder?.metadata as Record<string, unknown> | null) || {}),
+          permanentImageUrl: persisted.permanentImageUrl
+        }
+      });
     }
+
+    console.log(`[ORDER_FLOW] option selected ${selectedId}`);
+    console.log("[IMAGE] success");
+    console.log("[ORDER_FLOW] stage=waiting_confirmation");
 
     return {
       reply: buildPreviewReply(input.language),
       stage: "waiting_confirmation",
-      imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
+      imageUrls: [persisted.permanentImageUrl],
       memoryPatch: {
         language: input.language,
         flowMode: "AI_CARD_ORDER",
@@ -293,8 +359,8 @@ export class SalesWorkflowService {
         selectedOption: selectedOption.id,
         selectedOptionTitle: selectedOption.title,
         selectedDesignSummary: selectedOption.description,
-        selectedImageUrl: generated.imageUrl || "",
-        latestImageUrl: generated.imageUrl || "",
+        selectedImageUrl: persisted.permanentImageUrl,
+        latestImageUrl: persisted.permanentImageUrl,
         currentPrompt: selectedOption.prompt,
         latestPrompt: selectedOption.prompt,
         latestDesignStyle: selectedOption.style,
@@ -304,16 +370,19 @@ export class SalesWorkflowService {
         latestShippingType: selectedOption.shippingType,
         latestProductTitle: selectedOption.title,
         latestProductDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
-        currentOrderDraft: stampDraft({
-          ...draft,
-          stage: "waiting_confirmation",
-          selectedOption,
-          imageUrl: generated.imageUrl || "",
-          productTitle: selectedOption.title,
-          productDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
-          price: selectedOption.estimatedPrice.toFixed(2),
-          shippingType: selectedOption.shippingType
-        }, input.language)
+        currentOrderDraft: stampDraft(
+          {
+            ...draft,
+            stage: "waiting_confirmation",
+            selectedOption,
+            imageUrl: persisted.permanentImageUrl,
+            productTitle: selectedOption.title,
+            productDescription: buildDescription(selectedOption, draft.originalMessage, input.language),
+            price: selectedOption.estimatedPrice.toFixed(2),
+            shippingType: selectedOption.shippingType
+          },
+          input.language
+        )
       }
     };
   }
@@ -336,6 +405,15 @@ export class SalesWorkflowService {
       };
     }
 
+    const persisted = await persistPermanentImageOrFail({
+      input,
+      tempImageUrl: generated.imageUrl,
+      failureStage: "waiting_confirmation"
+    });
+    if (!persisted.ok) {
+      return persisted.response;
+    }
+
     const updatedOption: OrderDraftOption = {
       ...selected,
       description: input.language === "zh" ? `${selected.description} / 已按要求修改` : `${selected.description} / Updated based on your feedback`
@@ -355,15 +433,23 @@ export class SalesWorkflowService {
         finalDesignSummary: updatedOption.style
       });
     }
+
     if (draft.orderId) {
+      const currentOrder = await orderService.getOrderById(draft.orderId);
       await orderService.saveSelectedOption(draft.orderId, { ...updatedOption, prompt: revisedPrompt }, draft.originalMessage);
-      await orderService.attachGeneratedImage(draft.orderId, generated.imageUrl || "", revisedPrompt);
+      await orderService.attachGeneratedImage(draft.orderId, persisted.permanentImageUrl, revisedPrompt);
+      await orderService.updateOrderStatus(draft.orderId, OrderStatus.WAITING_CONFIRMATION, {
+        metadata: {
+          ...((currentOrder?.metadata as Record<string, unknown> | null) || {}),
+          permanentImageUrl: persisted.permanentImageUrl
+        }
+      });
     }
 
     return {
       reply: buildPreviewReply(input.language),
       stage: "waiting_confirmation",
-      imageUrls: generated.imageUrl ? [generated.imageUrl] : [],
+      imageUrls: [persisted.permanentImageUrl],
       memoryPatch: {
         language: input.language,
         flowMode: "AI_CARD_ORDER",
@@ -371,19 +457,22 @@ export class SalesWorkflowService {
         currentStage: "waiting_confirmation",
         currentPrompt: revisedPrompt,
         latestPrompt: revisedPrompt,
-        latestImageUrl: generated.imageUrl || "",
-        selectedImageUrl: generated.imageUrl || "",
+        latestImageUrl: persisted.permanentImageUrl,
+        selectedImageUrl: persisted.permanentImageUrl,
         latestDesignStyle: updatedOption.style,
         latestImageProvider: generated.imageProvider || "",
         latestImageModel: generated.imageModel || "",
         revisionHistory: [...input.memory.revisionHistory, input.message].slice(-10),
-        currentOrderDraft: stampDraft({
-          ...draft,
-          stage: "waiting_confirmation",
-          selectedOption: { ...updatedOption, prompt: revisedPrompt },
-          imageUrl: generated.imageUrl || "",
-          productDescription: buildDescription(updatedOption, draft.originalMessage, input.language)
-        }, input.language)
+        currentOrderDraft: stampDraft(
+          {
+            ...draft,
+            stage: "waiting_confirmation",
+            selectedOption: { ...updatedOption, prompt: revisedPrompt },
+            imageUrl: persisted.permanentImageUrl,
+            productDescription: buildDescription(updatedOption, draft.originalMessage, input.language)
+          },
+          input.language
+        )
       }
     };
   }
@@ -394,6 +483,7 @@ export class SalesWorkflowService {
     const shippingType = draft?.shippingType || stateManagerService.inferShippingType(input.message, input.memory);
     console.log(`[LANGUAGE] detected=${input.language}`);
     console.log(`[CONCEPT] using ${input.language} templates`);
+
     const refreshed = buildConceptOptions(`${baseMessage} ${input.message}`, input.language, shippingType);
 
     if (input.project?.projectId) {
@@ -426,29 +516,29 @@ export class SalesWorkflowService {
         flowMode: "AI_CARD_ORDER",
         stage: "draft_design",
         currentStage: "draft_design",
-        currentOrderDraft: stampDraft({
-          orderId: draft?.orderId,
-          orderNo: draft?.orderNo,
-          discordUserId: input.discordUserId,
-          stage: "draft_options",
-          originalMessage: baseMessage,
-          options: refreshed,
-          selectedOption: null,
-          imageUrl: "",
-          productTitle: "",
-          productDescription: "",
-          price: "",
-          shippingType: refreshed[0].shippingType,
-          shopifyProductUrl: ""
-        }, input.language)
+        currentOrderDraft: stampDraft(
+          {
+            orderId: draft?.orderId,
+            orderNo: draft?.orderNo,
+            discordUserId: input.discordUserId,
+            stage: "draft_options",
+            originalMessage: baseMessage,
+            options: refreshed,
+            selectedOption: null,
+            imageUrl: "",
+            productTitle: "",
+            productDescription: "",
+            price: "",
+            shippingType: refreshed[0].shippingType,
+            shopifyProductUrl: ""
+          },
+          input.language
+        )
       }
     };
   }
 
-  async createOrderLink(
-    input: WorkflowInput,
-    requestedLinkType: "product" | "checkout" = "product"
-  ): Promise<WorkflowResponse> {
+  async createOrderLink(input: WorkflowInput, requestedLinkType: "product" | "checkout" = "product"): Promise<WorkflowResponse> {
     const draft = input.memory.currentOrderDraft;
 
     if (draft?.shopifyProductUrl) {
@@ -472,20 +562,43 @@ export class SalesWorkflowService {
       };
     }
 
-    if (!draft || !(draft.stage === "image_generated" || draft.stage === "waiting_confirmation") || !draft.selectedOption || !draft.imageUrl) {
+    if (!draft || draft.stage !== "waiting_confirmation" || !draft.selectedOption) {
       return {
-        reply: t(input.language, "我还没有你的确认设计，请先选择方案并生成卡牌图。", "I do not have your confirmed design yet. Please choose a concept and generate the card image first."),
+        reply: t(
+          input.language,
+          "我还没有你的最终确认设计，请先选择方案并生成卡牌图。",
+          "I do not have your confirmed design yet. Please choose a concept and generate the card image first."
+        ),
         stage: input.memory.currentStage || "idle",
         memoryPatch: { language: input.language }
       };
     }
 
+    if (!draft.imageUrl) {
+      return {
+        reply: t(input.language, "缺少卡牌图，请先重新生成图片。", "Missing card artwork. Please generate the card image first."),
+        stage: "waiting_confirmation",
+        memoryPatch: { language: input.language }
+      };
+    }
+
+    const permanentImageUrl = await storageService.ensurePermanentImageUrl(draft.imageUrl);
+    if (!permanentImageUrl) {
+      return {
+        reply: t(input.language, "永久图片链接缺失，请重新生成图片。", "A permanent image URL is missing. Please generate the card image again."),
+        stage: "waiting_confirmation",
+        memoryPatch: { language: input.language }
+      };
+    }
+
     console.log("[SHOPIFY] create product from draft");
+    console.log(`[SHOPIFY IMAGE] using permanentImageUrl=${permanentImageUrl}`);
+
     const created = await shopifyService.createShopifyProductFromDiscord({
       title: draft.selectedOption.title,
       price: Number(draft.price || draft.selectedOption.estimatedPrice),
       description: draft.productDescription || buildDescription(draft.selectedOption, draft.originalMessage, input.language),
-      imageUrl: draft.imageUrl,
+      imageUrl: permanentImageUrl,
       shippingType: draft.shippingType,
       tags: ["discord-order", "custom-card", "lootcard-ai", draft.selectedOption.style],
       seoTitle: `${draft.selectedOption.title} Trading Card`,
@@ -497,7 +610,11 @@ export class SalesWorkflowService {
 
     if (!created.ok || !checkoutUrl || !productUrl) {
       return {
-        reply: t(input.language, `Shopify 产品创建失败：${created.error || "未知错误"}`, `Shopify product creation failed: ${created.error || "Unknown error"}`),
+        reply: t(
+          input.language,
+          `Shopify 产品创建失败：${created.error || "未知错误"}`,
+          `Shopify product creation failed: ${created.error || "Unknown error"}`
+        ),
         stage: "waiting_confirmation",
         memoryPatch: { language: input.language }
       };
@@ -520,7 +637,8 @@ export class SalesWorkflowService {
         price: Number(draft.price || draft.selectedOption.estimatedPrice),
         metadata: {
           source: "discord",
-          orderNo: draft.orderNo
+          orderNo: draft.orderNo,
+          permanentImageUrl
         }
       });
     }
@@ -568,12 +686,16 @@ export class SalesWorkflowService {
         latestProductTitle: draft.selectedOption.title,
         latestProductDescription: draft.productDescription,
         latestPrice: Number(draft.price || draft.selectedOption.estimatedPrice).toFixed(2),
-        currentOrderDraft: stampDraft({
-          ...draft,
-          stage: "shopify_created",
-          shopifyProductUrl: productUrl,
-          shopifyCheckoutUrl: checkoutUrl
-        }, input.language),
+        currentOrderDraft: stampDraft(
+          {
+            ...draft,
+            stage: "shopify_created",
+            imageUrl: permanentImageUrl,
+            shopifyProductUrl: productUrl,
+            shopifyCheckoutUrl: checkoutUrl
+          },
+          input.language
+        ),
         shopifyProductUrl: productUrl
       }
     };
