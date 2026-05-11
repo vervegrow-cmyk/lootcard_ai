@@ -9,8 +9,6 @@ import {
 } from "./skill.types";
 
 export type OrchestratorIntent =
-  | "customer_service"
-  | "after_sales"
   | "prompt_polish"
   | "design_start"
   | "design_collect"
@@ -20,21 +18,11 @@ export type OrchestratorIntent =
   | "revise_image"
   | "confirm_design"
   | "create_shopify_product_link"
-  | "language_preference"
-  | "general_chat";
+  | "language_preference";
 
-export type TargetAgent =
-  | "customer-service"
-  | "design"
-  | "prompt"
-  | "shopify"
-  | "memory";
+export type TargetAgent = "design" | "prompt" | "shopify" | "memory";
 
 export type TargetSkill =
-  | "answer-faq"
-  | "explain-pricing"
-  | "explain-delivery"
-  | "after-sales"
   | "collect-requirements"
   | "generate-style-options"
   | "generate-images"

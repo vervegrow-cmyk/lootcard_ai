@@ -18,7 +18,7 @@ export type ProjectStage =
 export type LanguagePreference = "zh" | "en";
 
 export type ShippingType = "digital_download" | "physical_card_us" | "physical_card_cn";
-export type FlowMode = "IDLE" | "AI_CARD_ORDER" | "RANDOM_DEMO" | "SHOPIFY_CHECKOUT";
+export type FlowMode = "IDLE" | "AI_CARD_ORDER" | "SHOPIFY_CHECKOUT";
 
 export type HermesIntent =
   | "answer_question"

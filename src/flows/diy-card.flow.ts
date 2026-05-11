@@ -1,20 +1,14 @@
-/** @deprecated Use diy-card.flow.ts only. Do not import this flow. */
-
 import { OrderStatus } from "@prisma/client";
 import { LanguagePreference, OrderDraftOption, ShippingType } from "../types";
+import { templates } from "../i18n/templates";
 import { imageService } from "../services/image.service";
 import { memoryService } from "../services/memory.service";
 import { orderService } from "../services/order.service";
 import { shopifyService } from "../services/shopify.service";
 import { storageService } from "../services/storage.service";
-import { templates } from "../i18n/templates";
+import { RouterIntent } from "../router/llm-router";
 
-type DiyStage =
-  | "IDLE"
-  | "CONCEPT_OPTIONS"
-  | "IMAGE_GENERATING"
-  | "WAITING_CONFIRMATION"
-  | "SHOPIFY_CREATED";
+type DiyStage = "IDLE" | "CONCEPT_OPTIONS" | "IMAGE_GENERATING" | "WAITING_CONFIRMATION" | "SHOPIFY_CREATED";
 
 interface DiySession {
   discordUserId: string;
@@ -38,98 +32,18 @@ interface DiyFlowInput {
   username: string;
   channelId: string;
   message: string;
+  intent: RouterIntent;
+  language: LanguagePreference;
 }
 
 interface DiyFlowResult {
   reply: string;
   imageUrls?: string[];
+  handled: boolean;
 }
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function hasChinese(text: string): boolean {
-  return /[\u4e00-\u9fff]/.test(text);
-}
-
-function buildLanguage(message: string, fallback: LanguagePreference = "en"): LanguagePreference {
-  const trimmed = message.trim();
-  if (!trimmed) {
-    return fallback;
-  }
-
-  if (/^(a|b|c|1|2|3)$/i.test(trimmed)) {
-    return fallback;
-  }
-
-  return hasChinese(trimmed) ? "zh" : "en";
-}
-
-function isCancel(message: string): boolean {
-  return /^(cancel|reset|exit|start over|取消|重新开始)$/i.test(message.trim());
-}
-
-function isSelectOption(message: string): "A" | "B" | "C" | null {
-  const normalized = message.trim().toUpperCase();
-  return normalized === "A" || normalized === "B" || normalized === "C" ? normalized : null;
-}
-
-function isConfirm(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return [
-    "1",
-    "confirm",
-    "yes",
-    "ok",
-    "go",
-    "checkout",
-    "buy"
-  ].includes(normalized);
-}
-
-function isRegenerate(message: string): boolean {
-  return /^(3|regenerate|retry|again|重新生成|再来几个方案)$/i.test(message.trim());
-}
-
-function isModifyCommand(message: string): boolean {
-  return /^(2|modify|edit|change|修改|改一下)$/i.test(message.trim());
-}
-
-function isGreeting(message: string): boolean {
-  return /^(hello|hi|hey|你好|您好|help)$/i.test(message.trim());
-}
-
-function isCreateCardRequest(message: string): boolean {
-  const text = message.trim();
-  if (!text) {
-    return false;
-  }
-
-  if (/^(hello|hi|hey|help|cancel|reset)$/i.test(text)) {
-    return false;
-  }
-
-  const lower = text.toLowerCase();
-  const keywordMatched =
-    /\b(card|trading card|anime|girl|black gold|ssr|character|waifu|mecha|cyberpunk|new girl)\b/i.test(text) ||
-    /卡|卡牌|美女|女角色|黑金|SSR|动漫|机甲|赛博/.test(text);
-
-  return text.length >= 6 || keywordMatched;
-}
-
-function isNewCardRequest(message: string): boolean {
-  const text = message.trim();
-  return (
-    /给我|我要|帮我|做图|生成图片|生成卡牌|卡牌图|黑金SSR|女角色卡牌|10张/.test(text) ||
-    /\bi want\b/i.test(text) ||
-    /\bcreate\b/i.test(text) ||
-    /\bgenerate\b/i.test(text) ||
-    /\bnew card\b/i.test(text) ||
-    /\bbeautiful girl card\b/i.test(text) ||
-    /\banime card\b/i.test(text) ||
-    /\bcustom trading card\b/i.test(text)
-  );
 }
 
 function buildShippingType(message: string): ShippingType {
@@ -148,7 +62,7 @@ function buildConcepts(message: string, language: LanguagePreference): OrderDraf
   const basePrompt = `${message}, ${templates[language].basePromptSuffix}`;
   const preset = templates[language].conceptPresets;
 
-  console.log(`[CONCEPT] using ${language} templates`);
+  console.log(`[DIY_FLOW] using ${language} templates`);
   return preset.map((item, index) => {
     const promptBase =
       index === 0
@@ -177,18 +91,45 @@ function buildDescription(session: DiySession, selected: OrderDraftOption): stri
   });
 }
 
-export class LootcardDiyFlow {
+export class DiyCardFlow {
   private readonly sessions = new Map<string, DiySession>();
 
-  private getSession(discordUserId: string): DiySession | null {
+  getSession(discordUserId: string): DiySession | null {
     return this.sessions.get(discordUserId) || null;
   }
 
-  private async persistSession(session: DiySession): Promise<void> {
-    this.sessions.set(session.discordUserId, {
-      ...session,
-      updatedAt: nowIso()
+  async cancel(discordUserId: string, username: string, language: LanguagePreference): Promise<DiyFlowResult> {
+    console.log("[DIY_FLOW] cancel matched");
+    const current = this.getSession(discordUserId);
+    const t = templates[language];
+
+    if (current?.orderId) {
+      try {
+        await orderService.cancelOrder(current.orderId, "user_cancelled");
+      } catch {
+        // ignore cancel persistence errors
+      }
+    }
+
+    this.sessions.delete(discordUserId);
+    await memoryService.updateUserMemory({
+      discordUserId,
+      username,
+      memoryPatch: {
+        language,
+        flowMode: "IDLE",
+        stage: "idle",
+        currentStage: "idle",
+        currentOrderDraft: null
+      }
     });
+
+    console.log("[DIY_FLOW] reset complete");
+    return { reply: t.cancelReply, handled: true };
+  }
+
+  private async persistSession(session: DiySession): Promise<void> {
+    this.sessions.set(session.discordUserId, { ...session, updatedAt: nowIso() });
 
     await memoryService.updateUserMemory({
       discordUserId: session.discordUserId,
@@ -241,66 +182,25 @@ export class LootcardDiyFlow {
     });
   }
 
-  private async clearPersistedState(discordUserId: string, username: string, language: LanguagePreference): Promise<void> {
-    await memoryService.updateUserMemory({
-      discordUserId,
-      username,
-      memoryPatch: {
-        language,
-        flowMode: "IDLE",
-        stage: "idle",
-        currentStage: "idle",
-        currentOrderDraft: null
-      }
-    });
-  }
-
-  isCancelRequest(message: string): boolean {
-    return isCancel(message);
-  }
-
-  async cancel(params: DiyFlowInput): Promise<DiyFlowResult> {
-    console.log("[DIY_FLOW] cancel matched");
-    const current = this.getSession(params.discordUserId);
-    const language = current?.language || "en";
-    const t = templates[language];
-
-    if (current?.orderId) {
-      try {
-        await orderService.cancelOrder(current.orderId, "user_cancelled");
-      } catch {
-        // ignore cancel persistence errors to keep reset deterministic
-      }
-    }
-
-    this.sessions.delete(params.discordUserId);
-    await this.clearPersistedState(params.discordUserId, params.username, language);
-    console.log("[SESSION] language reset");
-    console.log("[DIY_FLOW] reset complete");
-
-    return {
-      reply: t.cancelReply
-    };
-  }
-
-  private async startNewFlow(params: DiyFlowInput, language: LanguagePreference): Promise<DiyFlowResult> {
-    const options = buildConcepts(params.message, language);
-    const t = templates[language];
+  private async startNewFlow(params: DiyFlowInput): Promise<DiyFlowResult> {
+    const options = buildConcepts(params.message, params.language);
+    const t = templates[params.language];
     const order = await orderService.createDraftOrder({
       discordUserId: params.discordUserId,
       discordChannelId: params.channelId,
       originalPrompt: params.message,
       metadata: {
         source: "lootcarddiy",
-        language
+        language: params.language
       }
     });
+
     await orderService.saveDraftOptions(order.id, options);
 
     const session: DiySession = {
       discordUserId: params.discordUserId,
       username: params.username,
-      language,
+      language: params.language,
       stage: "CONCEPT_OPTIONS",
       orderId: order.id,
       orderNo: order.orderNo,
@@ -311,18 +211,16 @@ export class LootcardDiyFlow {
     };
 
     await this.persistSession(session);
-    console.log("[ORDER_FLOW] stage=CONCEPT_OPTIONS");
+    console.log("[DIY_FLOW] stage=CONCEPT_OPTIONS");
 
-    return {
-      reply: t.conceptOptions(options)
-    };
+    return { reply: t.conceptOptions(options), handled: true };
   }
 
   private async generateSelectedImage(session: DiySession, selectedId: "A" | "B" | "C"): Promise<DiyFlowResult> {
     const selected = session.options.find((option) => option.id === selectedId);
     const t = templates[session.language];
     if (!selected) {
-      return { reply: t.inFlow };
+      return { reply: t.inFlow, handled: true };
     }
 
     session.stage = "IMAGE_GENERATING";
@@ -335,15 +233,14 @@ export class LootcardDiyFlow {
     const generated = await imageService.generateImage(selected.prompt, selected.style);
     if (!generated.ok || !generated.imageUrl) {
       return {
-        reply: t.imageGenerateFailed(generated.error || (session.language === "zh" ? "未知错误" : "Unknown error"))
+        reply: t.imageGenerateFailed(generated.error || (session.language === "zh" ? "未知错误" : "Unknown error")),
+        handled: true
       };
     }
 
     const publicImageUrl = await storageService.uploadImageFromUrl(generated.imageUrl);
     if (!publicImageUrl) {
-      return {
-        reply: t.imageStorageFailed
-      };
+      return { reply: t.imageStorageFailed, handled: true };
     }
 
     if (session.orderId) {
@@ -362,26 +259,25 @@ export class LootcardDiyFlow {
     session.stage = "WAITING_CONFIRMATION";
     await this.persistSession(session);
 
-    console.log(`[ORDER_FLOW] option selected ${selectedId}`);
+    console.log(`[DIY_FLOW] option selected ${selectedId}`);
     console.log("[IMAGE] success");
-    console.log("[ORDER_FLOW] stage=WAITING_CONFIRMATION");
+    console.log("[DIY_FLOW] stage=WAITING_CONFIRMATION");
 
     return {
       reply: t.selectOption,
-      imageUrls: [publicImageUrl]
+      imageUrls: [publicImageUrl],
+      handled: true
     };
   }
 
   private async createProductFromSession(session: DiySession): Promise<DiyFlowResult> {
     const t = templates[session.language];
     if (!session.selectedOption || !session.imageUrl) {
-      return {
-        reply: t.missingImage
-      };
+      return { reply: t.missingImage, handled: true };
     }
 
     console.log("[SHOPIFY] create product from draft");
-    console.log(`[SHOPIFY IMAGE] using permanentImageUrl=${session.imageUrl}`);
+    console.log(`[SHOPIFY] image=permanentImageUrl ${session.imageUrl}`);
 
     const created = await shopifyService.createShopifyProductFromDiscord({
       title: session.selectedOption.title,
@@ -394,7 +290,8 @@ export class LootcardDiyFlow {
 
     if (!created.ok || !created.productUrl) {
       return {
-        reply: t.shopifyFailed(created.error || (session.language === "zh" ? "未知错误" : "Unknown error"))
+        reply: t.shopifyFailed(created.error || (session.language === "zh" ? "未知错误" : "Unknown error")),
+        handled: true
       };
     }
 
@@ -427,14 +324,15 @@ export class LootcardDiyFlow {
         title: session.selectedOption.title,
         price: session.selectedOption.estimatedPrice.toFixed(2),
         productUrl: created.productUrl
-      })
+      }),
+      handled: true
     };
   }
 
   private async modifyCurrentImage(session: DiySession, message: string): Promise<DiyFlowResult> {
     const t = templates[session.language];
     if (!session.selectedOption) {
-      return { reply: t.inFlow };
+      return { reply: t.inFlow, handled: true };
     }
 
     session.stage = "IMAGE_GENERATING";
@@ -444,7 +342,8 @@ export class LootcardDiyFlow {
     const generated = await imageService.generateImage(prompt, session.selectedOption.style);
     if (!generated.ok || !generated.imageUrl) {
       return {
-        reply: t.imageGenerateFailed(generated.error || (session.language === "zh" ? "未知错误" : "Unknown error"))
+        reply: t.imageGenerateFailed(generated.error || (session.language === "zh" ? "未知错误" : "Unknown error")),
+        handled: true
       };
     }
 
@@ -464,114 +363,72 @@ export class LootcardDiyFlow {
     await this.persistSession(session);
 
     console.log("[IMAGE] success");
-    console.log("[ORDER_FLOW] stage=WAITING_CONFIRMATION");
+    console.log("[DIY_FLOW] stage=WAITING_CONFIRMATION");
 
     return {
       reply: t.selectOption,
-      imageUrls: [publicImageUrl]
+      imageUrls: [publicImageUrl],
+      handled: true
     };
   }
 
   async handleMessage(params: DiyFlowInput): Promise<DiyFlowResult> {
     const existing = this.getSession(params.discordUserId);
-    const messageLanguage = buildLanguage(params.message, existing?.language || "en");
-    const t = templates[messageLanguage];
-    console.log(`[LANGUAGE] detected=${messageLanguage}`);
+    const t = templates[params.language];
 
     if (existing) {
-      existing.language = buildLanguage(params.message, existing.language);
+      existing.language = params.language;
       const currentT = templates[existing.language];
       existing.updatedAt = nowIso();
-      console.log("[SESSION] set flowMode=AI_CARD_ORDER");
-      console.log(`[ORDER_FLOW] stage=${existing.stage}`);
+
+      console.log(`[DIY_FLOW] stage=${existing.stage}`);
 
       if (existing.stage === "IMAGE_GENERATING") {
-        return { reply: currentT.inFlow };
-      }
-
-      if (isNewCardRequest(params.message)) {
-        console.log("[SESSION] new card request overrides current flow");
-        if (existing.orderId) {
-          try {
-            await orderService.cancelOrder(existing.orderId, "new_card_request");
-          } catch {
-            // ignore cancellation write failures
-          }
-        }
-        this.sessions.delete(params.discordUserId);
-        await this.clearPersistedState(params.discordUserId, params.username, existing.language);
-        console.log("[SESSION] reset current draft");
-        return this.startNewFlow(params, buildLanguage(params.message, existing.language));
+        return { reply: currentT.inFlow, handled: true };
       }
 
       if (existing.stage === "CONCEPT_OPTIONS") {
-        const selectedId = isSelectOption(params.message);
-        if (selectedId) {
+        const selectedId = params.intent === "CONFIRM_SELECTION" ? (params.message.trim().toUpperCase() as "A" | "B" | "C") : null;
+        if (selectedId && ["A", "B", "C"].includes(selectedId)) {
           return this.generateSelectedImage(existing, selectedId);
         }
-
-        if (isGreeting(params.message)) {
-          return { reply: currentT.inFlow };
-        }
-
-        return { reply: currentT.inFlow };
+        return { reply: currentT.inFlow, handled: true };
       }
 
       if (existing.stage === "WAITING_CONFIRMATION") {
-        if (isConfirm(params.message)) {
+        if (params.intent === "CREATE_SHOPIFY_PRODUCT") {
           return this.createProductFromSession(existing);
         }
-
-        if (isRegenerate(params.message)) {
+        if (params.intent === "REGENERATE") {
           if (existing.orderId) {
             try {
               await orderService.cancelOrder(existing.orderId, "regenerated_options");
             } catch {
-              // ignore cancellation write failures
+              // ignore cancellation
             }
           }
           this.sessions.delete(params.discordUserId);
-          await this.clearPersistedState(params.discordUserId, params.username, existing.language);
-          return this.startNewFlow(
-            {
-              ...params,
-              message: existing.originalMessage
-            },
-            existing.language
-          );
+          const restarted = await this.startNewFlow({ ...params, message: existing.originalMessage });
+          return { ...restarted, handled: true };
         }
-
-        if (isModifyCommand(params.message)) {
-          return {
-            reply: currentT.modifyDesign
-          };
+        if (params.intent === "MODIFY_DESIGN") {
+          return { reply: currentT.modifyDesign, handled: true };
         }
-
-        if (isGreeting(params.message)) {
-          return { reply: currentT.inFlow };
-        }
-
         return this.modifyCurrentImage(existing, params.message);
       }
 
       if (existing.stage === "SHOPIFY_CREATED") {
-        if (/付款链接|checkout|cart|payment link/i.test(params.message)) {
+        if (params.intent === "GET_PAYMENT_LINK") {
           return {
-            reply:
-              existing.checkoutUrl
-                ? currentT.paymentLink({
-                    orderNo: existing.orderNo || "-",
-                    title: existing.selectedOption?.title || "Custom AI Trading Card",
-                    price: existing.selectedOption?.estimatedPrice.toFixed(2) || "0.00",
-                    productUrl: existing.checkoutUrl
-                  })
-                : currentT.inFlow
-          };
-        }
-
-        if (isGreeting(params.message)) {
-          return {
-            reply: currentT.shopifyCreated
+            reply: existing.checkoutUrl
+              ? currentT.paymentLink({
+                  orderNo: existing.orderNo || "-",
+                  title: existing.selectedOption?.title || "Custom AI Trading Card",
+                  price: existing.selectedOption?.estimatedPrice.toFixed(2) || "0.00",
+                  productUrl: existing.checkoutUrl
+                })
+              : currentT.inFlow,
+            handled: true
           };
         }
 
@@ -584,26 +441,23 @@ export class LootcardDiyFlow {
                   price: existing.selectedOption?.estimatedPrice.toFixed(2) || "0.00",
                   productUrl: existing.productUrl
                 })
-              : currentT.inFlow
+              : currentT.inFlow,
+          handled: true
         };
       }
     }
 
-    if (isCreateCardRequest(params.message)) {
+    if (params.intent === "CREATE_DIY_CARD") {
       console.log("[DIY_FLOW] create request matched");
-      return this.startNewFlow(params, messageLanguage);
+      return this.startNewFlow(params);
     }
 
-    if (isGreeting(params.message)) {
-      return {
-        reply: t.askPrompt
-      };
+    if (params.intent === "GENERAL_HELP") {
+      return { reply: t.askPrompt, handled: true };
     }
 
-    return {
-      reply: t.askPrompt
-    };
+    return { reply: t.askPrompt, handled: false };
   }
 }
 
-export const lootcardDiyFlow = new LootcardDiyFlow();
+export const diyCardFlow = new DiyCardFlow();

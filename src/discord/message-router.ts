@@ -1,4 +1,3 @@
-import { AiRouteResult } from "../services/ai-router.service";
 import { CurrentOrderDraft, FlowMode, LanguagePreference } from "../types";
 import { sessionService } from "./session.service";
 
@@ -97,9 +96,8 @@ export class MessageRouter {
     message: string;
     flowMode: FlowMode;
     draft?: CurrentOrderDraft | null;
-    aiRoute: AiRouteResult;
   }): FlowRouteResult {
-    const { message, flowMode, draft, aiRoute } = params;
+    const { message, flowMode, draft } = params;
     const selected = detectSelection(message, draft);
     const languageSwitch = sessionService.detectLanguageSwitch(message);
 
@@ -159,14 +157,6 @@ export class MessageRouter {
 
         return { flowMode, action: "pass_through", handledByFlow: false };
       }
-    }
-
-    if (aiRoute.taskType === "image_generation") {
-      return {
-        flowMode: "AI_CARD_ORDER",
-        action: "start_ai_card_order",
-        handledByFlow: true
-      };
     }
 
     return {

@@ -1,7 +1,8 @@
 import { AttachmentBuilder, ChannelType, Client, GatewayIntentBits, Partials } from "discord.js";
-import { lootcardDiyFlow } from "../flows/lootcard-diy.flow";
+import { diyCardFlow } from "../flows/diy-card.flow";
 import { memoryService } from "../services/memory.service";
 import { logger } from "../utils/logger";
+import { llmRouter, RouterFlow } from "../router/llm-router";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -122,17 +123,35 @@ export class DiscordBot {
 
       let finalReply = "";
       let attachments: AttachmentBuilder[] = [];
+      let currentFlow: RouterFlow = "IDLE";
+      const activeSession = diyCardFlow.getSession(inbound.discordUserId);
+      if (activeSession) {
+        currentFlow = "DIY_CARD_FLOW";
+      }
 
       try {
-        if (lootcardDiyFlow.isCancelRequest(inbound.message)) {
-          const cancelResult = await lootcardDiyFlow.cancel(inbound);
+        const route = llmRouter.route({
+          message: inbound.message,
+          currentFlow,
+          fallbackLanguage: activeSession?.language || "en"
+        });
+        console.log("[LLM_ROUTER]", route);
+
+        if (route.intent === "CANCEL") {
+          const cancelResult = await diyCardFlow.cancel(inbound.discordUserId, inbound.username, route.language);
           finalReply = cancelResult.reply;
-        } else {
-          const result = await lootcardDiyFlow.handleMessage(inbound);
+        } else if (route.flow === "DIY_CARD_FLOW") {
+          const result = await diyCardFlow.handleMessage({
+            ...inbound,
+            intent: route.intent,
+            language: route.language
+          });
           finalReply = result.reply;
           if (result.imageUrls?.length) {
             attachments = await buildAttachmentsFromUrls(result.imageUrls);
           }
+        } else {
+          finalReply = route.language === "zh" ? "请描述你想要的卡牌需求。" : "Tell me what card you want.";
         }
       } catch (error) {
         logger.error("Failed to process lootcarddiy flow", error);
