@@ -1,15 +1,7 @@
-import { AttachmentBuilder, Client, GatewayIntentBits, Partials } from "discord.js";
-import { designAgent } from "../agents/design.agent";
-import { messageRouter } from "../discord/message-router";
-import { sessionService } from "../discord/session.service";
-import { hermesOrchestratorAgent } from "../agents/hermes-orchestrator.agent";
-import { aiRouterService } from "../services/ai-router.service";
+import { AttachmentBuilder, ChannelType, Client, GatewayIntentBits, Partials } from "discord.js";
+import { lootcardDiyFlow } from "../flows/lootcard-diy.flow";
 import { memoryService } from "../services/memory.service";
-import { orderService } from "../services/order.service";
-import { salesWorkflowService } from "../services/sales-workflow.service";
-import { stateManagerService } from "../services/state-manager.service";
 import { logger } from "../utils/logger";
-import { OrderStatus, Prisma } from "@prisma/client";
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -43,85 +35,6 @@ function validateDiscordTokenShape(token: string): { valid: boolean; reason?: st
   return { valid: true };
 }
 
-function detectLanguage(message: string, fallback: "zh" | "en" = "en"): "zh" | "en" {
-  return /[\u4e00-\u9fff]/.test(message) ? "zh" : fallback;
-}
-
-function isEchoModeEnabled(): boolean {
-  return (process.env.ECHO_BOT_MODE || "false").toLowerCase() === "true";
-}
-
-function isOrderSystemInitError(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
-    return false;
-  }
-
-  return error.code === "P2021" || error.code === "P2022";
-}
-
-function isOrderQuery(message: string): boolean {
-  const lower = message.toLowerCase();
-  return /我的订单|订单查询|查看订单/.test(message) || lower.includes("order status");
-}
-
-function shouldReuseDraftForMessage(
-  message: string,
-  draft: { stage?: string } | null | undefined
-): boolean {
-  if (!draft) {
-    return false;
-  }
-
-  if (draft.stage !== "shopify_created" && draft.stage !== "completed") {
-    return true;
-  }
-
-  return (
-    stateManagerService.wantsCheckoutLink(message) ||
-    stateManagerService.wantsProductLink(message) ||
-    stateManagerService.isPurchaseConfirmation(message)
-  );
-}
-
-function orderStatusLabel(status: OrderStatus): string {
-  const labels: Record<OrderStatus, string> = {
-    DRAFT: "草稿",
-    DESIGNING: "设计中",
-    OPTION_SELECTED: "已选择方案",
-    IMAGE_GENERATED: "已生成图片",
-    WAITING_CONFIRMATION: "等待确认",
-    SHOPIFY_CREATED: "商品已创建",
-    WAITING_PAYMENT: "等待付款",
-    PAID: "已付款",
-    PRODUCTION: "生产中",
-    SHIPPED: "已发货",
-    COMPLETED: "已完成",
-    CANCELLED: "已取消",
-    FAILED: "失败"
-  };
-  return labels[status] || status;
-}
-
-async function formatRecentOrders(discordUserId: string): Promise<string> {
-  const orders = await orderService.listUserOrders(discordUserId, 5);
-  if (!orders.length) {
-    return "📦 我的订单\n\n暂时还没有订单记录。";
-  }
-
-  return [
-    "📦 我的订单",
-    "",
-    ...orders.flatMap((order, index) => [
-      `${index + 1}. ${order.orderNo}`,
-      `状态：${orderStatusLabel(order.status)}`,
-      `商品：${order.productTitle || "未生成商品"}`,
-      ...(order.price ? [`价格：$${order.price.toString()}`] : []),
-      ...(order.shopifyProductUrl || order.shopifyCheckoutUrl ? [`链接：${order.shopifyProductUrl || order.shopifyCheckoutUrl}`] : []),
-      ""
-    ])
-  ].join("\n").trim();
-}
-
 async function buildAttachmentsFromUrls(urls: string[]): Promise<AttachmentBuilder[]> {
   const attachments: AttachmentBuilder[] = [];
 
@@ -141,12 +54,23 @@ async function buildAttachmentsFromUrls(urls: string[]): Promise<AttachmentBuild
     const arrayBuffer = await response.arrayBuffer();
     attachments.push(
       new AttachmentBuilder(Buffer.from(arrayBuffer), {
-        name: `lootcard-design-${index + 1}.${extension}`
+        name: `lootcarddiy-${index + 1}.${extension}`
       })
     );
   }
 
   return attachments;
+}
+
+function isLootcardDiyChannel(message: {
+  channel: { type: ChannelType } & { name?: string | null };
+}): boolean {
+  if (message.channel.type === ChannelType.DM) {
+    return false;
+  }
+
+  const name = String(message.channel.name || "");
+  return name.toLowerCase() === "lootcarddiy";
 }
 
 export class DiscordBot {
@@ -177,23 +101,21 @@ export class DiscordBot {
         return;
       }
 
+      if (!isLootcardDiyChannel(message)) {
+        return;
+      }
+
       const inbound = {
         discordUserId: message.author.id,
         username: message.author.username,
         channelId: message.channelId,
-        content: message.content.trim()
+        message: message.content.trim()
       };
 
-      console.log("[DISCORD] incoming message", inbound.content);
-      let language: "zh" | "en" = "en";
-
-      if (isEchoModeEnabled()) {
-        await message.reply(`Echo: ${inbound.content}`);
-        return;
-      }
+      console.log("[DISCORD] incoming message", inbound.message);
 
       try {
-        await memoryService.logConversation(inbound.discordUserId, "user", inbound.content);
+        await memoryService.logConversation(inbound.discordUserId, "user", inbound.message);
       } catch (error) {
         logger.error("Failed to log user conversation", error);
       }
@@ -202,256 +124,19 @@ export class DiscordBot {
       let attachments: AttachmentBuilder[] = [];
 
       try {
-        const snapshot = await memoryService.getOrCreateUserMemory(inbound.discordUserId, inbound.username);
-        const recentConversation = await memoryService.getRecentConversation(inbound.discordUserId);
-        const project = await memoryService.getLatestProject(inbound.discordUserId);
-        const activeOrder = await orderService.getLatestActiveOrderByDiscordUser(inbound.discordUserId);
-        const languageSwitch = sessionService.detectLanguageSwitch(inbound.content);
-        language = languageSwitch || detectLanguage(inbound.content, snapshot.memory.language);
-        console.log(`[LANGUAGE] detected=${language}`);
-        if (languageSwitch) {
-          console.log(`[LANGUAGE] switched=${language}`);
-        }
-        const persistedDraft =
-          snapshot.memory.currentOrderDraft ||
-          (activeOrder ? orderService.toCurrentOrderDraft(activeOrder) : null);
-        if (sessionService.isTimedOutDraft(persistedDraft)) {
-          console.log("[SESSION] stale AI_CARD_ORDER cleared");
-          await memoryService.updateUserMemory({
-            discordUserId: inbound.discordUserId,
-            username: inbound.username,
-            memoryPatch: {
-              flowMode: "IDLE",
-              stage: "idle",
-              currentStage: "idle",
-              currentOrderDraft: null
-            }
-          });
-        }
-        const timedOutDraft = sessionService.isTimedOutDraft(persistedDraft) ? null : persistedDraft;
-        const restoredDraft = shouldReuseDraftForMessage(inbound.content, timedOutDraft)
-          ? timedOutDraft
-          : null;
-        const aiRoute = aiRouterService.detectRoute(inbound.content);
-        const taskType = aiRoute.taskType;
-        const flowMode = sessionService.resolveFlowMode(
-          { ...snapshot.memory, language },
-          restoredDraft
-        );
-        const flowRoute = messageRouter.route({
-          message: inbound.content,
-          flowMode,
-          draft: restoredDraft,
-          aiRoute
-        });
-
-        console.log(`[AI ROUTER] taskType=${taskType}`);
-        console.log(`[SESSION] flowMode=${flowMode}`);
-        if (persistedDraft && !restoredDraft) {
-          console.log("[SESSION] stale checkout draft ignored for current message");
-        }
-
-        const workflowInput = {
-          discordUserId: inbound.discordUserId,
-          username: inbound.username,
-          message: inbound.content,
-          language,
-          memory: {
-            ...snapshot.memory,
-            language,
-            currentOrderDraft: restoredDraft
-          },
-          project,
-          recentConversation
-        } as const;
-
-        let workflowResult;
-        const draft = restoredDraft;
-        const activeStage = draft?.stage || (flowMode !== "IDLE" ? snapshot.memory.currentStage : "idle");
-        console.log(`[ORDER_FLOW] stage=${activeStage || "idle"}`);
-
-        let plan: ReturnType<typeof hermesOrchestratorAgent.plan> | null = null;
-
-        if (isOrderQuery(inbound.content)) {
-          finalReply = await formatRecentOrders(inbound.discordUserId);
-          workflowResult = null;
-        } else if (flowRoute.handledByFlow) {
-          switch (flowRoute.action) {
-            case "checkout_link":
-              workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "checkout");
-              break;
-            case "confirm":
-            case "product_link":
-              workflowResult = await salesWorkflowService.createOrderLink(workflowInput, "product");
-              break;
-            case "select_option":
-              workflowResult = flowRoute.selectedOption
-                ? await salesWorkflowService.generateImageForSelectedOption(workflowInput, flowRoute.selectedOption)
-                : null;
-              break;
-            case "modify":
-              workflowResult = await salesWorkflowService.modifyCurrentDesign(workflowInput);
-              break;
-            case "regenerate":
-            case "start_ai_card_order":
-              workflowResult = draft
-                ? await salesWorkflowService.regenerateOptions(workflowInput)
-                : await salesWorkflowService.createDraftOptions(workflowInput);
-              break;
-            case "reset_flow":
-              workflowResult = {
-                reply:
-                  language === "zh"
-                    ? "已取消当前卡牌定制流程。你可以直接告诉我新的卡牌需求。"
-                    : "The current card customization flow has been cancelled. You can send a new card request anytime.",
-                stage: "idle",
-                memoryPatch: {
-                  language,
-                  flowMode: "IDLE" as const,
-                  stage: "idle" as const,
-                  currentStage: "idle" as const,
-                  currentOrderDraft: null
-                }
-              };
-              break;
-            case "switch_language":
-              workflowResult = {
-                reply:
-                  flowRoute.language === "en"
-                    ? "Sure — I’ll reply in English from now on."
-                    : "可以，我之后会用中文回复你。",
-                stage: snapshot.memory.currentStage || "idle",
-                memoryPatch: {
-                  language: flowRoute.language || language
-                }
-              };
-              break;
-            case "reset_and_restart": {
-              const restartLanguage = flowRoute.language || language;
-              workflowResult = await salesWorkflowService.createDraftOptions({
-                ...workflowInput,
-                language: restartLanguage,
-                memory: {
-                  ...workflowInput.memory,
-                  language: restartLanguage,
-                  flowMode: "IDLE",
-                  currentOrderDraft: null,
-                  stage: "idle",
-                  currentStage: "idle"
-                }
-              });
-              break;
-            }
-            case "stay_in_flow":
-              finalReply =
-                flowMode === "SHOPIFY_CHECKOUT"
-                  ? language === "zh"
-                    ? "当前正在下单流程中。你可以回复“产品链接”查看商品页，或回复“付款链接”直接进入付款。"
-                    : 'You are currently in checkout. Reply "product link" to view the product page, or reply "payment link" for direct checkout.'
-                  : language === "zh"
-                    ? "当前正在 AI 卡牌定制流程中。请回复 A/B/C 选择方案，或回复 1确认下单、2修改设计、3重新生成，或回复“取消”重新开始。"
-                    : "You’re currently in a card customization flow. Reply A/B/C, 1 to confirm, 2 to modify, 3 to regenerate, or type cancel to start over.";
-              workflowResult = null;
-              break;
-            default:
-              workflowResult = null;
-              break;
-          }
+        if (lootcardDiyFlow.isCancelRequest(inbound.message)) {
+          const cancelResult = await lootcardDiyFlow.cancel(inbound);
+          finalReply = cancelResult.reply;
         } else {
-          console.log("[AGENT] route start");
-          plan = hermesOrchestratorAgent.plan({
-            discordUserId: inbound.discordUserId,
-            username: inbound.username,
-            message: inbound.content,
-            memory: {
-              ...snapshot.memory,
-              language,
-              currentOrderDraft: restoredDraft,
-              currentProject: project?.projectId || "",
-              imageOptions:
-                restoredDraft?.options.map((option) => ({
-                  id: option.id,
-                  title: option.title,
-                  imageUrl: "",
-                  prompt: option.prompt,
-                  summary: option.description,
-                  style: option.style
-                })) || []
-            },
-            recentConversation
-          });
-          console.log("[AGENT] route result", {
-            intent: plan.intent,
-            targetAgent: taskType === "image_generation" ? aiRoute.targetAgent : plan.targetAgent,
-            targetSkill: taskType === "image_generation" ? aiRoute.targetSkill : plan.targetSkill
-          });
-        }
-
-        if (!flowRoute.handledByFlow && taskType === "image_generation" && !draft && plan) {
-          const skillMemory = {
-            ...((snapshot.memory as unknown) as Record<string, unknown>),
-            currentOrderDraft: restoredDraft
-          } as never;
-
-          const skillResult = await designAgent.execute(plan, {
-            discordUserId: inbound.discordUserId,
-            username: inbound.username,
-            message: inbound.content,
-            language,
-            memory: skillMemory,
-            recentConversation,
-            project,
-            data: plan.data
-          });
-
-          finalReply = skillResult.reply;
-          if (skillResult.imageOptions?.length) {
-            attachments = await buildAttachmentsFromUrls(
-              skillResult.imageOptions.map((item) => item.imageUrl).filter(Boolean)
-            );
-          }
-
-          await memoryService.updateUserMemory({
-            discordUserId: inbound.discordUserId,
-            username: inbound.username,
-            memoryPatch: skillResult.memoryUpdate || {}
-          });
-
-          workflowResult = null;
-        } else if (!flowRoute.handledByFlow && taskType === "shopify_product_create") {
-          const requestedLinkType = stateManagerService.wantsCheckoutLink(inbound.content) ? "checkout" : "product";
-          workflowResult = await salesWorkflowService.createOrderLink(workflowInput, requestedLinkType);
-        } else if (!flowRoute.handledByFlow) {
-          workflowResult = await salesWorkflowService.answerGeneralQuestion(workflowInput);
-        }
-
-        if (workflowResult) {
-          if (workflowResult.memoryPatch.flowMode === "AI_CARD_ORDER") {
-            console.log("[SESSION] set flowMode=AI_CARD_ORDER");
-          }
-          await memoryService.updateUserMemory({
-            discordUserId: inbound.discordUserId,
-            username: inbound.username,
-            memoryPatch: workflowResult.memoryPatch
-          });
-
-          if (project?.projectId && workflowResult.projectPatch) {
-            await memoryService.updateProject(project.projectId, workflowResult.projectPatch);
-          }
-
-          finalReply = workflowResult.reply;
-
-          if (workflowResult.imageUrls?.length) {
-            attachments = await buildAttachmentsFromUrls(workflowResult.imageUrls);
+          const result = await lootcardDiyFlow.handleMessage(inbound);
+          finalReply = result.reply;
+          if (result.imageUrls?.length) {
+            attachments = await buildAttachmentsFromUrls(result.imageUrls);
           }
         }
       } catch (error) {
-        logger.error("Failed to process Discord message", error);
-        finalReply = isOrderSystemInitError(error)
-          ? "订单系统初始化失败，请稍后重试。"
-          : error instanceof Error
-            ? error.message
-            : "处理请求时发生未知错误。";
+        logger.error("Failed to process lootcarddiy flow", error);
+        finalReply = error instanceof Error ? error.message : "Unknown error";
       }
 
       try {
